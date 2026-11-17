@@ -16,6 +16,9 @@ bin/
 *.suo
 *.sln.docstates
 
+# Android Remote (Separated Repository)
+AndroidRemote/
+
 # OS generated
 Thumbs.db
 ehthumbs.db
