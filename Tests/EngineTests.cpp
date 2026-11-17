@@ -3372,6 +3372,83 @@ public:
       mixerVc->processTestAudioBlock(nullptr, 0, hwOutPtrs, 2, 128);
       expect(vc.sendRing.availableRead() == 128);
       expect(vc.sendPeakL.load() > 0.05f);
+
+      // 5. Continuous 20-block ASRC sine wave continuity (44.1 kHz -> 48 kHz)
+      // Verifies zero sample loss and zero boundary phase-jump clicks
+      {
+        nova::graviton::VirtualCableSlot asrcSlot;
+        asrcSlot.returnEnabled.store(true);
+        asrcSlot.returnSampleRate.store(44100.0);
+        std::vector<float> sineL(10000), sineR(10000);
+        for (size_t i = 0; i < 10000; ++i) {
+          sineL[i] = 0.6f * std::sin(2.0f * juce::MathConstants<float>::pi *
+                                     440.0f * static_cast<float>(i) / 44100.0f);
+          sineR[i] = -sineL[i];
+        }
+        asrcSlot.returnRing.pushFrames(sineL.data(), sineR.data(), 10000);
+
+        float prevLastL = 0.0f;
+        float prevLastR = 0.0f;
+        std::array<float, 256> blkL{}, blkR{};
+        for (int blk = 0; blk < 20; ++blk) {
+          asrcSlot.pullReturnBlock(blkL.data(), blkR.data(), 256, 48000.0);
+          if (blk > 0) {
+            expect(std::abs(blkL[0] - prevLastL) < 0.12f,
+                   "ASRC block boundary must stay phase-continuous without clicks");
+            expect(std::abs(blkR[0] - prevLastR) < 0.12f,
+                   "ASRC R channel boundary must stay phase-continuous");
+          }
+          prevLastL = blkL[255];
+          prevLastR = blkR[255];
+        }
+        expectEquals(static_cast<int>(asrcSlot.returnRing.underrunCount.load()),
+                     0);
+      }
+
+      // 6. De-click underrun decay (smooth fade instead of hard drop to 0.0)
+      {
+        nova::graviton::VirtualCableSlot undSlot;
+        undSlot.returnEnabled.store(true);
+        undSlot.returnSampleRate.store(48000.0);
+        undSlot.returnPacketsReceived.store(1);
+        std::array<float, 512> constL{}, constR{};
+        constL.fill(0.6f);
+        constR.fill(-0.6f);
+        undSlot.returnRing.pushFrames(constL.data(), constR.data(), 512);
+
+        std::array<float, 256> pL{}, pR{};
+        undSlot.pullReturnBlock(pL.data(), pR.data(), 256, 48000.0);
+        undSlot.pullReturnBlock(pL.data(), pR.data(), 256, 48000.0);
+        undSlot.pullReturnBlock(pL.data(), pR.data(), 256, 48000.0);
+        expect(pL[0] > 0.35f,
+               "Underrun sample 0 must decay smoothly instead of jumping to 0");
+        expect(pL[10] < pL[0] && pL[63] < 0.05f,
+               "Underrun decay must smoothly taper to silence");
+        expect(undSlot.returnRing.underrunCount.load() > 0);
+      }
+
+      // 7. Stereo L/R channel routing (both Left & Right target channels receive signal)
+      {
+        auto mixerSt = std::make_unique<nova::MixerEngine>();
+        auto &stVc = mixerSt->virtualTransport.cables[0];
+        stVc.returnEnabled.store(true);
+        stVc.returnSampleRate.store(48000.0);
+        stVc.returnTargetChannelL.store(0);
+        stVc.returnTargetChannelR.store(1);
+
+        std::array<float, 256> lBuf{}, rBuf{};
+        lBuf.fill(0.4f);
+        rBuf.fill(0.25f);
+        stVc.returnRing.pushFrames(lBuf.data(), rBuf.data(), 256);
+
+        std::array<float, 128> oL{}, oR{};
+        float *oPtrs[2] = {oL.data(), oR.data()};
+        mixerSt->processTestAudioBlock(nullptr, 0, oPtrs, 2, 128);
+        expectWithinAbsoluteError(mixerSt->channels[0].trimmedPeak.load(), 0.4f,
+                                  0.02f);
+        expectWithinAbsoluteError(mixerSt->channels[1].trimmedPeak.load(),
+                                  0.25f, 0.02f);
+      }
     }
 
     beginTest("HERITAGE VIRTUAL CABLE FASE 2: Shared Memory IPC 4-pair stereo "

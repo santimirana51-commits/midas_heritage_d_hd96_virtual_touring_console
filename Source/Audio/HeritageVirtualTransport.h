@@ -263,6 +263,30 @@ public:
     return toWrite;
   }
 
+  size_t peekFrames(float *outL, float *outR, size_t maxCount) const noexcept {
+    if (outL == nullptr || outR == nullptr || maxCount == 0)
+      return 0;
+    const size_t w = writePos.load(std::memory_order_acquire);
+    const size_t r = readPos.load(std::memory_order_relaxed);
+    const size_t avail = w - r;
+    const size_t toPeek = std::min(maxCount, avail);
+    for (size_t i = 0; i < toPeek; ++i) {
+      const size_t idx = (r + i) & kMask;
+      outL[i] = bufL[idx];
+      outR[i] = bufR[idx];
+    }
+    return toPeek;
+  }
+
+  void advanceRead(size_t count) noexcept {
+    if (count == 0)
+      return;
+    const size_t w = writePos.load(std::memory_order_acquire);
+    const size_t r = readPos.load(std::memory_order_relaxed);
+    const size_t avail = w - r;
+    readPos.store(r + std::min(count, avail), std::memory_order_release);
+  }
+
   size_t popFrames(float *outL, float *outR, size_t count) noexcept {
     if (outL == nullptr || outR == nullptr || count == 0)
       return 0;
@@ -332,18 +356,39 @@ struct VirtualCableSlot final {
   std::atomic<bool> loopGuardEnabled{true};
   std::atomic<bool> loopBlocked{false};
 
-  // Pre-allocated ASRC interpolators (zero audio-thread heap allocation)
+  // Pre-allocated ASRC interpolators & de-click state (zero audio-thread alloc)
   juce::LagrangeInterpolator interpL;
   juce::LagrangeInterpolator interpR;
   double cachedRatio = 1.0;
+  double smoothedRatio = 1.0;
+  float lastSampleL = 0.0f;
+  float lastSampleR = 0.0f;
+  float fadeEnv = 1.0f;
+  float smoothedReturnGain = 1.0f;
+  float smoothedSendGain = 1.0f;
+  bool returnPrimed = false;
+  bool inUnderrunRecovery = false;
   std::array<float, kMaxBlockScratch> asrcSrcL{};
   std::array<float, kMaxBlockScratch> asrcSrcR{};
 
-  // Control-thread configured names/IP (protected by spin/lock on control path)
+  // Control-thread configured names/IP + lock-free mirrors for UDP thread
   juce::CriticalSection configLock;
   juce::String returnStreamName{"HeritageIn1"};
   juce::String sendStreamName{"HeritageOut1"};
   juce::String sendTargetIp{"127.0.0.1"};
+  std::array<char, 17> fastReturnStreamName{"HeritageIn1"};
+  std::array<char, 17> fastSendStreamName{"HeritageOut1"};
+  std::array<char, 64> fastSendTargetIp{"127.0.0.1"};
+
+  static void copyTruncated(char *dst, size_t dstCap,
+                            const juce::String &src) noexcept {
+    if (dst == nullptr || dstCap == 0)
+      return;
+    const auto utf8 = src.toRawUTF8();
+    const size_t len = std::min(dstCap - 1, std::strlen(utf8));
+    std::memcpy(dst, utf8, len);
+    dst[len] = '\0';
+  }
 
   void reset() noexcept {
     returnRing.reset();
@@ -356,15 +401,31 @@ struct VirtualCableSlot final {
     interpL.reset();
     interpR.reset();
     cachedRatio = 1.0;
+    smoothedRatio = 1.0;
+    lastSampleL = 0.0f;
+    lastSampleR = 0.0f;
+    fadeEnv = 1.0f;
+    smoothedReturnGain = 1.0f;
+    smoothedSendGain = 1.0f;
+    returnPrimed = false;
+    inUnderrunRecovery = false;
   }
 
   void setReturnStreamName(const juce::String &name) {
     const juce::ScopedLock sl(configLock);
     returnStreamName = name.substring(0, 16);
+    copyTruncated(fastReturnStreamName.data(), fastReturnStreamName.size(),
+                  returnStreamName);
   }
   juce::String getReturnStreamName() const {
     const juce::ScopedLock sl(configLock);
     return returnStreamName;
+  }
+
+  bool matchesReturnStreamName(const char *rxName) const noexcept {
+    if (rxName == nullptr)
+      return false;
+    return std::strncmp(fastReturnStreamName.data(), rxName, 16) == 0;
   }
 
   void setSendTarget(const juce::String &ip, int port,
@@ -373,6 +434,10 @@ struct VirtualCableSlot final {
     sendTargetIp = ip;
     sendTargetPort.store(std::clamp(port, 1, 65535), std::memory_order_relaxed);
     sendStreamName = streamName.substring(0, 16);
+    copyTruncated(fastSendTargetIp.data(), fastSendTargetIp.size(),
+                  sendTargetIp);
+    copyTruncated(fastSendStreamName.data(), fastSendStreamName.size(),
+                  sendStreamName);
   }
 
   void getSendTarget(juce::String &ip, int &port, juce::String &streamName) const {
@@ -411,44 +476,108 @@ struct VirtualCableSlot final {
       std::fill(outR, outR + numSamples, 0.0f);
       returnPeakL.store(0.0f, std::memory_order_relaxed);
       returnPeakR.store(0.0f, std::memory_order_relaxed);
+      lastSampleL = 0.0f;
+      lastSampleR = 0.0f;
+      fadeEnv = 1.0f;
+      returnPrimed = false;
+      inUnderrunRecovery = false;
       return;
     }
 
     const double srcSr =
         std::max(8000.0, returnSampleRate.load(std::memory_order_relaxed));
     const double dstSr = std::max(8000.0, mixerSampleRate);
-    const double ratio = srcSr / dstSr;
+    const double nominalRatio = srcSr / dstSr;
+    if (std::abs(nominalRatio - cachedRatio) > 0.01) {
+      interpL.reset();
+      interpR.reset();
+      cachedRatio = nominalRatio;
+      smoothedRatio = nominalRatio;
+    }
 
-    if (std::abs(ratio - 1.0) < 1.0e-5) {
-      returnRing.popFrames(outL, outR, static_cast<size_t>(n));
+    size_t avail = returnRing.availableRead();
+
+    // High-water overflow guard: trim excessive jitter buildup cleanly
+    if (avail > 6144) {
+      returnRing.advanceRead(avail - 1536);
+      avail = returnRing.availableRead();
+      fadeEnv = 0.0f;
+    }
+
+    // Adaptive clock-drift servo when actively receiving remote packets
+    const uint64_t pktsRx =
+        returnPacketsReceived.load(std::memory_order_relaxed);
+    if (pktsRx > 4) {
+      const double driftAdjust = std::clamp(
+          (static_cast<double>(avail) - 1536.0) / 1638400.0, -0.0015, 0.0015);
+      smoothedRatio =
+          0.98 * smoothedRatio + 0.02 * (nominalRatio + driftAdjust);
     } else {
-      if (std::abs(ratio - cachedRatio) > 0.01) {
-        interpL.reset();
-        interpR.reset();
-        cachedRatio = ratio;
+      smoothedRatio = nominalRatio;
+    }
+
+    const bool useDirectPop = (std::abs(smoothedRatio - 1.0) < 1.0e-5);
+    const size_t minNeeded =
+        static_cast<size_t>(std::ceil(static_cast<double>(n) * smoothedRatio)) +
+        (useDirectPop ? 0u : 5u);
+
+    if (pktsRx > 0) {
+      if (!returnPrimed &&
+          avail >= std::clamp<size_t>(minNeeded * 2, 256, 1536)) {
+        returnPrimed = true;
       }
-      const size_t avail = returnRing.availableRead();
-      const int needed = std::min(
-          static_cast<int>(kMaxBlockScratch),
-          static_cast<int>(std::ceil(static_cast<double>(n) * ratio)) + 4);
-      const size_t toPop = std::min(avail, static_cast<size_t>(needed));
-      if (toPop > 0) {
-        returnRing.popFrames(asrcSrcL.data(), asrcSrcR.data(), toPop);
-        interpL.process(ratio, asrcSrcL.data(), outL, n,
-                        static_cast<int>(toPop), 0);
-        interpR.process(ratio, asrcSrcR.data(), outR, n,
-                        static_cast<int>(toPop), 0);
-      } else {
-        std::fill(outL, outL + n, 0.0f);
-        std::fill(outR, outR + n, 0.0f);
+      if (inUnderrunRecovery &&
+          avail >= std::clamp<size_t>(minNeeded * 3, 512, 2048)) {
+        inUnderrunRecovery = false;
+      }
+    }
+
+    const bool bufferingHold =
+        (pktsRx > 0 && (!returnPrimed || inUnderrunRecovery));
+    if (bufferingHold || avail < minNeeded) {
+      if (avail < minNeeded && returnPrimed) {
+        inUnderrunRecovery = true;
         returnRing.underrunCount.fetch_add(1, std::memory_order_relaxed);
       }
+      float pkL = 0.0f;
+      float pkR = 0.0f;
+      for (int i = 0; i < n; ++i) {
+        lastSampleL *= 0.90f;
+        lastSampleR *= 0.90f;
+        outL[i] = sanitize(lastSampleL);
+        outR[i] = sanitize(lastSampleR);
+        pkL = std::max(pkL, std::abs(outL[i]));
+        pkR = std::max(pkR, std::abs(outR[i]));
+      }
+      if (n < numSamples) {
+        std::fill(outL + n, outL + numSamples, 0.0f);
+        std::fill(outR + n, outR + numSamples, 0.0f);
+      }
+      fadeEnv = 0.0f;
+      returnPeakL.store(pkL, std::memory_order_relaxed);
+      returnPeakR.store(pkR, std::memory_order_relaxed);
+      return;
+    }
+
+    if (useDirectPop) {
+      returnRing.popFrames(outL, outR, static_cast<size_t>(n));
+    } else {
+      const size_t toPeek = std::min<size_t>(kMaxBlockScratch, minNeeded + 4);
+      const size_t peeked =
+          returnRing.peekFrames(asrcSrcL.data(), asrcSrcR.data(), toPeek);
+      const int consumedL = interpL.process(smoothedRatio, asrcSrcL.data(), outL,
+                                            n, static_cast<int>(peeked), 0);
+      const int consumedR = interpR.process(smoothedRatio, asrcSrcR.data(), outR,
+                                            n, static_cast<int>(peeked), 0);
+      const int consumed = std::clamp(std::min(consumedL, consumedR), 0,
+                                      static_cast<int>(peeked));
+      returnRing.advanceRead(static_cast<size_t>(consumed));
     }
 
     const bool muted = returnMuted.load(std::memory_order_relaxed);
     const float gainDb = std::clamp(
         returnGainDb.load(std::memory_order_relaxed), -90.0f, 12.0f);
-    const float linGain =
+    const float targetLinGain =
         (muted || gainDb <= -89.5f)
             ? 0.0f
             : static_cast<float>(dbToGain(static_cast<double>(gainDb)));
@@ -456,10 +585,19 @@ struct VirtualCableSlot final {
     float pkL = 0.0f;
     float pkR = 0.0f;
     for (int i = 0; i < n; ++i) {
-      outL[i] = sanitize(outL[i] * linGain);
-      outR[i] = sanitize(outR[i] * linGain);
+      smoothedReturnGain += (targetLinGain - smoothedReturnGain) * 0.04f;
+      fadeEnv += (1.0f - fadeEnv) * 0.08f;
+      const float env = smoothedReturnGain * fadeEnv;
+      outL[i] = sanitize(outL[i] * env);
+      outR[i] = sanitize(outR[i] * env);
+      lastSampleL = outL[i];
+      lastSampleR = outR[i];
       pkL = std::max(pkL, std::abs(outL[i]));
       pkR = std::max(pkR, std::abs(outR[i]));
+    }
+    if (n < numSamples) {
+      std::fill(outL + n, outL + numSamples, 0.0f);
+      std::fill(outR + n, outR + numSamples, 0.0f);
     }
     returnPeakL.store(pkL, std::memory_order_relaxed);
     returnPeakR.store(pkR, std::memory_order_relaxed);
@@ -473,6 +611,7 @@ struct VirtualCableSlot final {
     if (!sendEnabled.load(std::memory_order_relaxed)) {
       sendPeakL.store(0.0f, std::memory_order_relaxed);
       sendPeakR.store(0.0f, std::memory_order_relaxed);
+      smoothedSendGain = 0.0f;
       return;
     }
 
@@ -482,19 +621,23 @@ struct VirtualCableSlot final {
     const bool muted = sendMuted.load(std::memory_order_relaxed);
     const float gainDb =
         std::clamp(sendGainDb.load(std::memory_order_relaxed), -90.0f, 12.0f);
-    const float linGain =
+    const float targetLinGain =
         (blocked || muted || gainDb <= -89.5f)
             ? 0.0f
             : static_cast<float>(dbToGain(static_cast<double>(gainDb)));
+    if (blocked)
+      smoothedSendGain = 0.0f;
 
     const int n = std::min(numSamples, static_cast<int>(kMaxBlockScratch));
     float pkL = 0.0f;
     float pkR = 0.0f;
     for (int i = 0; i < n; ++i) {
+      if (!blocked)
+        smoothedSendGain += (targetLinGain - smoothedSendGain) * 0.04f;
       const float sL = std::clamp(
-          static_cast<float>(sanitize(inL[i] * linGain)), -1.0f, 1.0f);
+          static_cast<float>(sanitize(inL[i] * smoothedSendGain)), -1.0f, 1.0f);
       const float sR = std::clamp(
-          static_cast<float>(sanitize(inR[i] * linGain)), -1.0f, 1.0f);
+          static_cast<float>(sanitize(inR[i] * smoothedSendGain)), -1.0f, 1.0f);
       asrcSrcL[static_cast<size_t>(i)] = sL;
       asrcSrcR[static_cast<size_t>(i)] = sR;
       pkL = std::max(pkL, std::abs(sL));
@@ -589,7 +732,19 @@ public:
   bool isSharedMemoryOpen() const noexcept { return shmMapping.isOpen(); }
   HeritageShmBlock *getSharedMemoryBlock() noexcept { return shmMapping.get(); }
 
+  void pumpSharedMemoryFromAudioThread() noexcept {
+    audioThreadPumpsShm.store(true, std::memory_order_relaxed);
+    pumpSharedMemoryOnce();
+  }
+
   void pumpSharedMemoryOnce() noexcept {
+    if (shmPumpBusy.test_and_set(std::memory_order_acquire))
+      return;
+    struct BusyGuard final {
+      std::atomic_flag &flag;
+      ~BusyGuard() noexcept { flag.clear(std::memory_order_release); }
+    } busyGuard{shmPumpBusy};
+
     auto *shm = shmMapping.get();
     if (shm == nullptr || !shm->isValid())
       return;
@@ -672,14 +827,15 @@ private:
       const bool useShm = (mode == TransportBackend::SharedMemory ||
                            mode == TransportBackend::Both) &&
                           shmMapping.isOpen();
+      bool didWork = false;
 
-      if (useShm)
+      if (useShm && !audioThreadPumpsShm.load(std::memory_order_relaxed))
         pumpSharedMemoryOnce();
 
       if (useVban) {
-        // 1. Drain incoming VBAN UDP packets
+        // 1. Drain all available incoming VBAN UDP packets non-blocking
         while (!threadShouldExit() && socket != nullptr &&
-               socket->waitUntilReady(true, 1) > 0) {
+               socket->waitUntilReady(true, 0) > 0) {
           juce::String senderIp;
           int senderPort = 0;
           const int bytesRead =
@@ -687,16 +843,16 @@ private:
                            senderIp, senderPort);
           if (bytesRead <= 0)
             break;
+          didWork = true;
           const auto info = vban_detail::decodeAudioPacket(
               rxBuf.data(), static_cast<size_t>(bytesRead), pktL.data(),
               pktR.data(), pktL.size());
           if (!info.valid)
             continue;
 
-          const juce::String rxName(info.streamName);
           for (auto &c : cables) {
             if (c.returnEnabled.load(std::memory_order_relaxed) &&
-                c.getReturnStreamName() == rxName) {
+                c.matchesReturnStreamName(info.streamName)) {
               c.returnSampleRate.store(info.sampleRate,
                                        std::memory_order_relaxed);
               c.returnRing.pushFrames(pktL.data(), pktR.data(),
@@ -706,7 +862,7 @@ private:
           }
         }
 
-        // 2. Drain outgoing Send ring buffers into VBAN UDP packets
+        // 2. Immediately drain outgoing Send ring buffers into VBAN UDP packets
         const double sr = engineSampleRate.load(std::memory_order_relaxed);
         for (auto &c : cables) {
           if (!c.sendEnabled.load(std::memory_order_relaxed))
@@ -716,25 +872,29 @@ private:
           const size_t maxChunk =
               ((fmt & 0x07) == vban_detail::kFormatFloat32) ? 128 : 256;
           while (c.sendRing.availableRead() >= maxChunk) {
+            didWork = true;
             c.sendRing.popFrames(pktL.data(), pktR.data(), maxChunk);
-            juce::String ip;
-            int port = 6980;
-            juce::String streamName;
-            c.getSendTarget(ip, port, streamName);
+            const int port = c.sendTargetPort.load(std::memory_order_relaxed);
             const uint32_t fc =
                 c.sendFrameCounter.fetch_add(1, std::memory_order_relaxed);
             const size_t pktLen = vban_detail::encodeAudioPacket(
                 txBuf.data(), txBuf.size(), pktL.data(), pktR.data(),
-                static_cast<int>(maxChunk), sr, fmt, streamName.toRawUTF8(),
+                static_cast<int>(maxChunk), sr, fmt, c.fastSendStreamName.data(),
                 fc);
             if (pktLen > 0 && socket != nullptr) {
-              socket->write(ip, port, txBuf.data(), static_cast<int>(pktLen));
+              socket->write(juce::String::fromUTF8(c.fastSendTargetIp.data()),
+                            port, txBuf.data(), static_cast<int>(pktLen));
               c.sendPacketsSent.fetch_add(1, std::memory_order_relaxed);
             }
           }
         }
-      } else {
-        juce::Thread::sleep(2);
+      }
+
+      if (!didWork) {
+        if (useVban && socket != nullptr)
+          socket->waitUntilReady(true, 1);
+        else
+          juce::Thread::sleep(1);
       }
     }
   }
@@ -744,6 +904,8 @@ private:
   std::atomic<int> backend{static_cast<int>(TransportBackend::Both)};
   std::atomic<int> boundPort{0};
   std::atomic<double> engineSampleRate{48000.0};
+  std::atomic<bool> audioThreadPumpsShm{false};
+  std::atomic_flag shmPumpBusy = ATOMIC_FLAG_INIT;
 };
 
 } // namespace nova::graviton

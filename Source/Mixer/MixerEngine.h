@@ -1530,6 +1530,15 @@ public:
     const double rawEngineSr = sampleRate.load(std::memory_order_relaxed);
     const double vcSr = (rawEngineSr > 1000.0) ? rawEngineSr : 48000.0;
     virtualTransport.setEngineSampleRate(vcSr);
+    const auto pumpVirtualCableShmIfActive = [this]() noexcept {
+      const auto bk = virtualTransport.getTransportBackend();
+      if (virtualTransport.isSharedMemoryOpen() &&
+          (bk == nova::graviton::TransportBackend::SharedMemory ||
+           bk == nova::graviton::TransportBackend::Both)) {
+        virtualTransport.pumpSharedMemoryFromAudioThread();
+      }
+    };
+    pumpVirtualCableShmIfActive();
     channelVirtualCableSource.fill(-1);
     const int vcBlockSamples = std::min(numSamples, 4096);
     for (size_t k = 0; k < nova::graviton::VirtualCableTransport::kNumVirtualCables;
@@ -2841,6 +2850,7 @@ public:
             vcBlockSamples);
       }
     }
+    pumpVirtualCableShmIfActive();
     if (recorder.isMultitrackActive()) {
       if (numSamples <= rawMultitrackRecordBuffer.getNumSamples())
         recorder.pushMultitrack(

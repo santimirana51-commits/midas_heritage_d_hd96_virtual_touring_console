@@ -9108,7 +9108,8 @@ public:
       row.btnRetEn = std::make_unique<MidasTactileButton>(
           "RET: OFF", MidasTactileButton::GlowMode::Cyan);
       row.btnRetCh = std::make_unique<MidasTactileButton>(
-          "CH " + juce::String(k * 2 + 1), MidasTactileButton::GlowMode::Cyan);
+          "CH " + juce::String(k * 2 + 1) + "-" + juce::String(k * 2 + 2),
+          MidasTactileButton::GlowMode::Cyan);
       row.btnRetMute = std::make_unique<MidasTactileButton>(
           "M", MidasTactileButton::GlowMode::Red);
       row.btnSndEn = std::make_unique<MidasTactileButton>(
@@ -9135,17 +9136,28 @@ public:
         auto &vc = engine.virtualTransport.cables[k];
         const bool next = !vc.returnEnabled.load(std::memory_order_relaxed);
         vc.returnEnabled.store(next, std::memory_order_relaxed);
-        if (next && vc.returnTargetChannelL.load(std::memory_order_relaxed) < 0)
-          vc.returnTargetChannelL.store(static_cast<int>(k * 2),
-                                        std::memory_order_relaxed);
+        if (next) {
+          int chL = vc.returnTargetChannelL.load(std::memory_order_relaxed);
+          if (chL < 0) {
+            chL = static_cast<int>(k * 2);
+            vc.returnTargetChannelL.store(chL, std::memory_order_relaxed);
+          }
+          if (vc.returnTargetChannelR.load(std::memory_order_relaxed) < 0 &&
+              chL + 1 < nova::kLogicalChannels) {
+            vc.returnTargetChannelR.store(chL + 1, std::memory_order_relaxed);
+          }
+        }
         vc.updateLoopGuard();
         refreshButtonLabels();
       };
       row.btnRetCh->onClick = [this, k] {
         auto &vc = engine.virtualTransport.cables[k];
-        const int cur = vc.returnTargetChannelL.load(std::memory_order_relaxed);
-        const int next = (cur < 0 || cur >= 15) ? 0 : (cur + 1);
-        vc.returnTargetChannelL.store(next, std::memory_order_relaxed);
+        const int curL = vc.returnTargetChannelL.load(std::memory_order_relaxed);
+        const int curPair = (curL < 0) ? 0 : (curL / 2);
+        const int nextPair = (curL < 0 || curPair >= 7) ? 0 : (curPair + 1);
+        vc.returnTargetChannelL.store(nextPair * 2, std::memory_order_relaxed);
+        vc.returnTargetChannelR.store(nextPair * 2 + 1,
+                                      std::memory_order_relaxed);
         vc.updateLoopGuard();
         refreshButtonLabels();
       };
@@ -9368,8 +9380,8 @@ public:
       x += 78.0f;
       rows[k].btnRetEn->setBounds(static_cast<int>(x), static_cast<int>(ry), 66, 24);
       x += 70.0f;
-      rows[k].btnRetCh->setBounds(static_cast<int>(x), static_cast<int>(ry), 50, 24);
-      x += 54.0f;
+      rows[k].btnRetCh->setBounds(static_cast<int>(x), static_cast<int>(ry), 60, 24);
+      x += 64.0f;
       rows[k].btnRetMute->setBounds(static_cast<int>(x), static_cast<int>(ry), 26, 24);
       x += 34.0f;
       rows[k].btnSndEn->setBounds(static_cast<int>(x), static_cast<int>(ry), 66, 24);
@@ -9448,9 +9460,15 @@ private:
       const bool retOn = vc.returnEnabled.load(std::memory_order_relaxed);
       const bool retM = vc.returnMuted.load(std::memory_order_relaxed);
       const int chL = vc.returnTargetChannelL.load(std::memory_order_relaxed);
+      const int chR = vc.returnTargetChannelR.load(std::memory_order_relaxed);
       r.btnRetEn->setButtonText(retOn ? "RET: ON" : "RET: OFF");
-      r.btnRetCh->setButtonText(chL >= 0 ? ("CH " + juce::String(chL + 1))
-                                         : "NONE");
+      juce::String chTxt = "NONE";
+      if (chL >= 0) {
+        chTxt = (chR == chL + 1)
+                    ? ("CH " + juce::String(chL + 1) + "-" + juce::String(chR + 1))
+                    : ("CH " + juce::String(chL + 1));
+      }
+      r.btnRetCh->setButtonText(chTxt);
       r.btnRetMute->setToggleState(retM, juce::dontSendNotification);
 
       const bool sndOn = vc.sendEnabled.load(std::memory_order_relaxed);
