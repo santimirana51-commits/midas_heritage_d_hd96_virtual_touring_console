@@ -16,17 +16,18 @@
 namespace nova::graviton {
 
 // ==============================================================================
-// VBAN (VB-Audio Network) Protocol Helpers — 28-byte Header over UDP (Port 6980)
+// VBAN (VB-Audio Network) Protocol Helpers — 28-byte Header over UDP (Port
+// 6980)
 // ==============================================================================
 #pragma pack(push, 1)
 struct VbanHeader {
-  char vban[4];             // "VBAN"
-  uint8_t srAndProto;       // Bits 0-4: SR index, Bits 5-7: Sub-protocol (0=Audio)
-  uint8_t nSamplesMinus1;   // 0..255 -> 1..256 samples per frame
-  uint8_t nChannelsMinus1;  // 0..7   -> 1..8 channels
-  uint8_t dataFormat;       // 0x01=INT16, 0x02=INT24, 0x04=FLOAT32
-  char streamName[16];      // ASCII stream name
-  uint32_t frameCounter;    // Sequential packet counter
+  char vban[4];       // "VBAN"
+  uint8_t srAndProto; // Bits 0-4: SR index, Bits 5-7: Sub-protocol (0=Audio)
+  uint8_t nSamplesMinus1;  // 0..255 -> 1..256 samples per frame
+  uint8_t nChannelsMinus1; // 0..7   -> 1..8 channels
+  uint8_t dataFormat;      // 0x01=INT16, 0x02=INT24, 0x04=FLOAT32
+  char streamName[16];     // ASCII stream name
+  uint32_t frameCounter;   // Sequential packet counter
 };
 #pragma pack(pop)
 static_assert(sizeof(VbanHeader) == 28, "VBAN header must be exactly 28 bytes");
@@ -39,8 +40,8 @@ inline constexpr uint8_t kFormatFloat32 = 0x04;
 inline constexpr size_t kMaxUdpPayload = 1472;
 
 inline constexpr std::array<double, 21> kSampleRates = {
-    6000.0,  12000.0, 24000.0, 48000.0, 96000.0, 192000.0, 384000.0,
-    8000.0,  11025.0, 22050.0, 44100.0, 88200.0, 176400.0, 352800.0,
+    6000.0,  12000.0, 24000.0, 48000.0,  96000.0,  192000.0, 384000.0,
+    8000.0,  11025.0, 22050.0, 44100.0,  88200.0,  176400.0, 352800.0,
     16000.0, 32000.0, 64000.0, 128000.0, 256000.0, 512000.0, 48000.0};
 
 inline int sampleRateToIndex(double sr) noexcept {
@@ -75,10 +76,10 @@ inline size_t bytesPerSample(uint8_t fmt) noexcept {
 }
 
 inline size_t encodeAudioPacket(uint8_t *outBytes, size_t outCapacity,
-                                  const float *inL, const float *inR,
-                                  int numSamples, double sampleRate,
-                                  uint8_t dataFormat, const char *streamName,
-                                  uint32_t frameCounter) noexcept {
+                                const float *inL, const float *inR,
+                                int numSamples, double sampleRate,
+                                uint8_t dataFormat, const char *streamName,
+                                uint32_t frameCounter) noexcept {
   if (outBytes == nullptr || inL == nullptr || numSamples <= 0 ||
       numSamples > 256)
     return 0;
@@ -111,8 +112,7 @@ inline size_t encodeAudioPacket(uint8_t *outBytes, size_t outCapacity,
   for (int i = 0; i < numSamples; ++i) {
     for (int ch = 0; ch < channels; ++ch) {
       const float s = std::clamp(
-          static_cast<float>(sanitize(ch == 0 ? inL[i] : inR[i])), -1.0f,
-          1.0f);
+          static_cast<float>(sanitize(ch == 0 ? inL[i] : inR[i])), -1.0f, 1.0f);
       if ((dataFormat & 0x07) == kFormatFloat32) {
         std::memcpy(payload, &s, 4);
         payload += 4;
@@ -148,8 +148,8 @@ inline DecodedVbanInfo decodeAudioPacket(const uint8_t *inBytes,
                                          float *outR,
                                          size_t maxOutSamples) noexcept {
   DecodedVbanInfo info;
-  if (inBytes == nullptr || inBytesLen < sizeof(VbanHeader) || outL == nullptr ||
-      outR == nullptr)
+  if (inBytes == nullptr || inBytesLen < sizeof(VbanHeader) ||
+      outL == nullptr || outR == nullptr)
     return info;
 
   VbanHeader hdr{};
@@ -243,8 +243,7 @@ public:
     return CapacityPow2 - (w - r);
   }
 
-  size_t pushFrames(const float *inL, const float *inR,
-                    size_t count) noexcept {
+  size_t pushFrames(const float *inL, const float *inR, size_t count) noexcept {
     if (inL == nullptr || count == 0)
       return 0;
     const size_t w = writePos.load(std::memory_order_relaxed);
@@ -440,7 +439,8 @@ struct VirtualCableSlot final {
                   sendStreamName);
   }
 
-  void getSendTarget(juce::String &ip, int &port, juce::String &streamName) const {
+  void getSendTarget(juce::String &ip, int &port,
+                     juce::String &streamName) const {
     const juce::ScopedLock sl(configLock);
     ip = sendTargetIp;
     port = sendTargetPort.load(std::memory_order_relaxed);
@@ -565,18 +565,18 @@ struct VirtualCableSlot final {
       const size_t toPeek = std::min<size_t>(kMaxBlockScratch, minNeeded + 4);
       const size_t peeked =
           returnRing.peekFrames(asrcSrcL.data(), asrcSrcR.data(), toPeek);
-      const int consumedL = interpL.process(smoothedRatio, asrcSrcL.data(), outL,
-                                            n, static_cast<int>(peeked), 0);
-      const int consumedR = interpR.process(smoothedRatio, asrcSrcR.data(), outR,
-                                            n, static_cast<int>(peeked), 0);
+      const int consumedL = interpL.process(
+          smoothedRatio, asrcSrcL.data(), outL, n, static_cast<int>(peeked), 0);
+      const int consumedR = interpR.process(
+          smoothedRatio, asrcSrcR.data(), outR, n, static_cast<int>(peeked), 0);
       const int consumed = std::clamp(std::min(consumedL, consumedR), 0,
                                       static_cast<int>(peeked));
       returnRing.advanceRead(static_cast<size_t>(consumed));
     }
 
     const bool muted = returnMuted.load(std::memory_order_relaxed);
-    const float gainDb = std::clamp(
-        returnGainDb.load(std::memory_order_relaxed), -90.0f, 12.0f);
+    const float gainDb =
+        std::clamp(returnGainDb.load(std::memory_order_relaxed), -90.0f, 12.0f);
     const float targetLinGain =
         (muted || gainDb <= -89.5f)
             ? 0.0f
@@ -615,9 +615,8 @@ struct VirtualCableSlot final {
       return;
     }
 
-    const bool blocked =
-        loopGuardEnabled.load(std::memory_order_relaxed) &&
-        loopBlocked.load(std::memory_order_relaxed);
+    const bool blocked = loopGuardEnabled.load(std::memory_order_relaxed) &&
+                         loopBlocked.load(std::memory_order_relaxed);
     const bool muted = sendMuted.load(std::memory_order_relaxed);
     const float gainDb =
         std::clamp(sendGainDb.load(std::memory_order_relaxed), -90.0f, 12.0f);
@@ -651,13 +650,10 @@ struct VirtualCableSlot final {
 };
 
 // ==============================================================================
-// VirtualCableTransport: 4 Stereo Pairs + VBAN UDP & Windows SYSVAD Shared Memory
+// VirtualCableTransport: 4 Stereo Pairs + VBAN UDP & Windows SYSVAD Shared
+// Memory
 // ==============================================================================
-enum class TransportBackend : int {
-  VbanUdp = 0,
-  SharedMemory = 1,
-  Both = 2
-};
+enum class TransportBackend : int { VbanUdp = 0, SharedMemory = 1, Both = 2 };
 
 class VirtualCableTransport final : private juce::Thread {
 public:
@@ -821,9 +817,9 @@ private:
 
     while (!threadShouldExit()) {
       const auto mode = getTransportBackend();
-      const bool useVban =
-          (mode == TransportBackend::VbanUdp || mode == TransportBackend::Both) &&
-          socket != nullptr;
+      const bool useVban = (mode == TransportBackend::VbanUdp ||
+                            mode == TransportBackend::Both) &&
+                           socket != nullptr;
       const bool useShm = (mode == TransportBackend::SharedMemory ||
                            mode == TransportBackend::Both) &&
                           shmMapping.isOpen();
@@ -867,8 +863,7 @@ private:
         for (auto &c : cables) {
           if (!c.sendEnabled.load(std::memory_order_relaxed))
             continue;
-          const uint8_t fmt =
-              c.sendVbanFormat.load(std::memory_order_relaxed);
+          const uint8_t fmt = c.sendVbanFormat.load(std::memory_order_relaxed);
           const size_t maxChunk =
               ((fmt & 0x07) == vban_detail::kFormatFloat32) ? 128 : 256;
           while (c.sendRing.availableRead() >= maxChunk) {
@@ -879,8 +874,8 @@ private:
                 c.sendFrameCounter.fetch_add(1, std::memory_order_relaxed);
             const size_t pktLen = vban_detail::encodeAudioPacket(
                 txBuf.data(), txBuf.size(), pktL.data(), pktR.data(),
-                static_cast<int>(maxChunk), sr, fmt, c.fastSendStreamName.data(),
-                fc);
+                static_cast<int>(maxChunk), sr, fmt,
+                c.fastSendStreamName.data(), fc);
             if (pktLen > 0 && socket != nullptr) {
               socket->write(juce::String::fromUTF8(c.fastSendTargetIp.data()),
                             port, txBuf.data(), static_cast<int>(pktLen));

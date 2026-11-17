@@ -413,6 +413,9 @@ public:
   int getMonitorFifoQueueDepth() const noexcept {
     return monitorFifoQueueDepth.load(std::memory_order_relaxed);
   }
+  int getMonitorFifoReady() const noexcept {
+    return monitorFifo.getNumReady();
+  }
   float getMonitorFifoLatencyMs() const noexcept {
     return monitorFifoLatencyMs.load(std::memory_order_relaxed);
   }
@@ -1190,6 +1193,8 @@ public:
     compressorAttack = static_cast<float>(std::exp(-1.0 / (0.010 * sr)));
     compressorRelease = static_cast<float>(std::exp(-1.0 / (0.120 * sr)));
     signalGenerator.reset(sr);
+    prevSurroundActive = false;
+    binauralPreviewSpatializer.reset();
     running.store(true);
   }
 
@@ -1477,14 +1482,19 @@ public:
     std::array<double, kLogicalChannels> channelTargetGainBlock{};
     std::array<double, kLogicalChannels> panGainLeftBlock{};
     std::array<double, kLogicalChannels> panGainRightBlock{};
+    std::array<bool, kLogicalChannels> monitorAssignedBlock{};
+    std::array<bool, kLogicalChannels> monitorPreFaderBlock{};
+    std::array<double, kLogicalChannels> monitorSendGainBlock{};
     std::array<nova::graviton::SurroundSpeakerGains, kLogicalChannels>
         channelSurroundGains{};
     std::array<int, kLogicalChannels> channelSurroundModes{};
     std::array<float, 12> blockSurroundPeaks{};
     std::array<int, kLogicalChannels> channelCallbackSource{};
     std::array<bool, kLogicalChannels> channelInputAvailable{};
+    std::array<bool, kLogicalChannels> isExternalSidechainSource{};
     bool anyExternalSidechainTarget = false;
     bool anyDuganAssigned = false;
+    bool anySurroundActive = false;
 
     const bool vscBlockActive = dawStreamer.isVirtualSoundcheckActive();
     bool anyStageBoxOutputPatched = false;
@@ -1503,8 +1513,13 @@ public:
       const auto channelIndex = static_cast<size_t>(c);
       const auto &channel = channels[channelIndex];
       if (channel.sidechainSourceType.load(std::memory_order_relaxed) ==
-          static_cast<int>(nova::graviton::KeySourceType::External))
+          static_cast<int>(nova::graviton::KeySourceType::External)) {
         anyExternalSidechainTarget = true;
+        const int extSrcCh = std::clamp(
+            channel.sidechainExternalChannel.load(std::memory_order_relaxed),
+            0, kLogicalChannels - 1);
+        isExternalSidechainSource[static_cast<size_t>(extSrcCh)] = true;
+      }
       if (channel.duganGroup.load(std::memory_order_relaxed) > 0)
         anyDuganAssigned = true;
 
@@ -1568,11 +1583,11 @@ public:
       const auto &channel = channels[channelIndex];
       if (!channelInputAvailable[channelIndex] &&
           !channel.sidechainKeyListen.load(std::memory_order_relaxed) &&
-          !anyExternalSidechainTarget)
+          !isExternalSidechainSource[channelIndex])
         continue;
       if (channelGatedBlock[channelIndex] &&
           channelGainSmooth[channelIndex] < 1.0e-6 &&
-          !anyExternalSidechainTarget)
+          !isExternalSidechainSource[channelIndex])
         continue;
       inputTrimLinearGain[channelIndex] = juce::Decibels::decibelsToGain(
           juce::jlimit(-20.0f, 60.0f,
@@ -1621,11 +1636,25 @@ public:
       panGainLeftBlock[channelIndex] = panGainsBlock.left;
       panGainRightBlock[channelIndex] = panGainsBlock.right;
 
+      const bool monAssigned =
+          channel.monitorAssigned.load(std::memory_order_relaxed);
+      monitorAssignedBlock[channelIndex] = monAssigned;
+      if (monAssigned) {
+        monitorPreFaderBlock[channelIndex] =
+            channel.monitorPreFader.load(std::memory_order_relaxed);
+        const float monSendDb = nova::graviton::clampFinite(
+            channel.monitorSendDb.load(std::memory_order_relaxed), -90.0f,
+            10.0f, 0.0f);
+        monitorSendGainBlock[channelIndex] =
+            static_cast<double>(nova::graviton::dbToGain(monSendDb));
+      }
+
       // Phase 85: 7.1.4 Surround / Immersive 3D Spatial Vector Panning (MIDAS
       // Chapter 30)
       const int sMode = channel.surroundMode.load(std::memory_order_relaxed);
       channelSurroundModes[channelIndex] = sMode;
       if (sMode > 0) {
+        anySurroundActive = true;
         channelSurroundGains[channelIndex] =
             nova::graviton::SurroundPanner::calculateGains(
                 static_cast<nova::graviton::SurroundMode>(sMode),
@@ -1642,6 +1671,10 @@ public:
         panGainRightBlock[channelIndex] = downR;
       }
     }
+    if (prevSurroundActive && !anySurroundActive) {
+      binauralPreviewSpatializer.reset();
+    }
+    prevSurroundActive = anySurroundActive;
     const double sr =
         std::max(8000.0, sampleRate.load(std::memory_order_relaxed));
     // Graviton computes the 10 ms smoothing coefficient in double once per
@@ -1863,6 +1896,49 @@ public:
     // Phase 65: activate the newest validated safe AUX bus graph plan at the
     // audio block boundary; realtime path stays lock-free and allocation-free.
     safeBusGraphActivation.activatePendingAtBlockBoundary();
+    const auto &busPlan = safeBusGraphActivation.activePlan();
+    std::array<std::size_t, kLogicalChannels> chBusRouteStart{};
+    std::array<std::size_t, kLogicalChannels> chBusRouteCount{};
+    bool busRoutesContiguous = true;
+    {
+      std::array<bool, kLogicalChannels> chBusSeen{};
+      int prevRouteCh = -1;
+      for (std::size_t r = 0; r < busPlan.routeCount; ++r) {
+        const int rc = static_cast<int>(busPlan.routes[r].channel);
+        if (rc < 0 || rc >= kLogicalChannels) {
+          busRoutesContiguous = false;
+          break;
+        }
+        const auto rci = static_cast<size_t>(rc);
+        if (rc != prevRouteCh) {
+          if (chBusSeen[rci]) {
+            busRoutesContiguous = false;
+            break;
+          }
+          chBusSeen[rci] = true;
+          chBusRouteStart[rci] = r;
+          prevRouteCh = rc;
+        }
+        ++chBusRouteCount[rci];
+      }
+    }
+
+    const double auxIemCeilingLinBlock =
+        nova::graviton::dbToGain(static_cast<double>(std::clamp(
+            auxIemCeilingDb.load(std::memory_order_relaxed), -24.0f, 0.0f)));
+    std::array<bool, kAuxBusCapacity> auxIemLimiterEnabledBlock{};
+    std::array<bool, kAuxBusCapacity> auxMutedBlock{};
+    for (int a = 0; a < kAuxBusCapacity; ++a) {
+      const auto index = static_cast<size_t>(a);
+      auxIemLimiterEnabledBlock[index] =
+          auxIemLimiterEnabled[index].load(std::memory_order_relaxed);
+      auxMutedBlock[index] = auxMuted[index].load(std::memory_order_relaxed);
+    }
+    std::array<bool, kMatrixBusCapacity> matrixMutedBlock{};
+    for (int m = 0; m < kMatrixBusCapacity; ++m) {
+      matrixMutedBlock[static_cast<size_t>(m)] =
+          matrixMuted[static_cast<size_t>(m)].load(std::memory_order_relaxed);
+    }
 
     // Phase 66: snapshot final master bus chain controls (true-peak limiter,
     // parametric master EQ, dither) once per audio block.
@@ -1888,6 +1964,16 @@ public:
     masterBusChain.setDitherEnabled(
         masterBusDitherEnabled.load(std::memory_order_relaxed));
 
+    std::array<double, 12> sampleSurroundOutputs{};
+    std::array<double, kAuxBusCapacity> auxSums{};
+    std::array<double, kLogicalChannels> channelDirectOutSamples{};
+    std::array<double, kLogicalChannels> externalSidechainSamples{};
+    std::array<bool, kLogicalChannels> externalSidechainAvailable{};
+    std::array<double, kAuxBusCapacity> masteredAuxDoubleSamples{};
+    std::array<float, kAuxBusCapacity> masteredAuxSamples{};
+    std::array<double, kMatrixBusCapacity> matrixRawOutputs{};
+    std::array<float, kMatrixBusCapacity> matrixSamples{};
+
     for (int s = 0; s < numSamples; ++s) {
       // Graviton Mk 2: accumulate the stereo Main bus in double precision.
       // Channel DSP and device buffers remain float for this migration step.
@@ -1895,11 +1981,11 @@ public:
       double monMixL = 0.0, monMixR = 0.0;
       double soloSumL_A = 0.0, soloSumR_A = 0.0;
       double soloSumL_B = 0.0, soloSumR_B = 0.0;
-      std::array<double, 12> sampleSurroundOutputs{};
-      std::array<double, kAuxBusCapacity> auxSums{};
-      std::array<double, kLogicalChannels> channelDirectOutSamples{};
-      std::array<double, kLogicalChannels> externalSidechainSamples{};
-      std::array<bool, kLogicalChannels> externalSidechainAvailable{};
+      auxSums.fill(0.0);
+      if (anySurroundActive)
+        sampleSurroundOutputs.fill(0.0);
+      if (anyExternalSidechainTarget)
+        externalSidechainAvailable.fill(false);
 
       // External keys tap the source channel before its channel processing.
       // This keeps key routing independent of channel order and avoids any
@@ -2344,50 +2430,72 @@ public:
                                                panGainRightBlock[channelIndex]);
         }
 
-        if (state.monitorAssigned.load(std::memory_order_relaxed)) {
-          const float monSendDb = nova::graviton::clampFinite(
-              state.monitorSendDb.load(std::memory_order_relaxed), -90.0f,
-              10.0f, 0.0f);
-          const float monSendGain = nova::graviton::dbToGain(monSendDb);
-          const double monSource =
-              state.monitorPreFader.load(std::memory_order_relaxed) ? drySendSan
-                                                                    : postSan;
-          monMixL = nova::graviton::sanitize(
-              monMixL +
-              monSource * monSendGain * panGainLeftBlock[channelIndex]);
-          monMixR = nova::graviton::sanitize(
-              monMixR +
-              monSource * monSendGain * panGainRightBlock[channelIndex]);
-        }
-        const auto &busPlan = safeBusGraphActivation.activePlan();
-        for (std::size_t r = 0; r < busPlan.routeCount; ++r) {
-          const auto &route = busPlan.routes[r];
-          if (static_cast<int>(route.channel) != c)
-            continue;
-          const std::size_t sendAuxIndex = static_cast<std::size_t>(route.aux);
-          if (sendAuxIndex >= auxSums.size() ||
-              static_cast<std::size_t>(route.channel) >=
-                  static_cast<std::size_t>(nova::kBusGraphChannels)) {
-            continue;
+        if (monitorAssignedBlock[channelIndex]) {
+          const double monSendGain = monitorSendGainBlock[channelIndex];
+          if (monSendGain > 0.0) {
+            const double monSource =
+                monitorPreFaderBlock[channelIndex] ? drySendSan : postSan;
+            monMixL = nova::graviton::sanitize(
+                monMixL +
+                monSource * monSendGain * panGainLeftBlock[channelIndex]);
+            monMixR = nova::graviton::sanitize(
+                monMixR +
+                monSource * monSendGain * panGainRightBlock[channelIndex]);
           }
-          const double sendSource = route.preFader ? drySendSan : postSan;
-          nova::graviton::accumulateBus(auxSums[sendAuxIndex], sendSource,
-                                        route.gain);
         }
-        // ScalableBusGraph plan covers up to kBusGraphChannels (32) and
-        // kBusGraphAuxCount (8). For remaining channels or auxes (8..95),
-        // accumulate from activeAuxRoutingSnapshot:
+        if (busPlan.routeCount > 0) {
+          if (busRoutesContiguous) {
+            const std::size_t rStart = chBusRouteStart[channelIndex];
+            const std::size_t rEnd = rStart + chBusRouteCount[channelIndex];
+            for (std::size_t r = rStart; r < rEnd; ++r) {
+              const auto &route = busPlan.routes[r];
+              const std::size_t sendAuxIndex =
+                  static_cast<std::size_t>(route.aux);
+              if (sendAuxIndex >= auxSums.size() ||
+                  static_cast<std::size_t>(route.channel) >=
+                      static_cast<std::size_t>(nova::kBusGraphChannels)) {
+                continue;
+              }
+              const double sendSource = route.preFader ? drySendSan : postSan;
+              nova::graviton::accumulateBus(auxSums[sendAuxIndex], sendSource,
+                                            route.gain);
+            }
+          } else {
+            for (std::size_t r = 0; r < busPlan.routeCount; ++r) {
+              const auto &route = busPlan.routes[r];
+              if (static_cast<int>(route.channel) != c)
+                continue;
+              const std::size_t sendAuxIndex =
+                  static_cast<std::size_t>(route.aux);
+              if (sendAuxIndex >= auxSums.size() ||
+                  static_cast<std::size_t>(route.channel) >=
+                      static_cast<std::size_t>(nova::kBusGraphChannels)) {
+                continue;
+              }
+              const double sendSource = route.preFader ? drySendSan : postSan;
+              nova::graviton::accumulateBus(auxSums[sendAuxIndex], sendSource,
+                                            route.gain);
+            }
+          }
+        }
+        // ScalableBusGraph plan covers up to kBusGraphChannels and
+        // kBusGraphAuxCount. For remaining channels or auxes, accumulate from
+        // activeAuxRoutingSnapshot sparse route list:
         const auto &chRouting = activeAuxRoutingSnapshot.channels[channelIndex];
         const std::size_t startAux =
             (c < nova::kBusGraphChannels)
                 ? static_cast<std::size_t>(nova::kBusGraphAuxCount)
                 : 0;
-        for (std::size_t a = startAux; a < kAuxBusCapacity; ++a) {
-          const double gain = chRouting.sendGains[a];
-          if (gain > 1.0e-5) {
-            const double sendSource =
-                chRouting.sendPreFader[a] ? drySendSan : postSan;
-            nova::graviton::accumulateBus(auxSums[a], sendSource, gain);
+        const std::size_t activeRouteCount =
+            std::min(chRouting.routeCount, chRouting.routes.size());
+        for (std::size_t r = 0; r < activeRouteCount; ++r) {
+          const auto &ar = chRouting.routes[r];
+          if (ar.auxIndex < startAux || ar.auxIndex >= kAuxBusCapacity)
+            continue;
+          if (ar.gain > 1.0e-5) {
+            const double sendSource = ar.preFader ? drySendSan : postSan;
+            nova::graviton::accumulateBus(auxSums[ar.auxIndex], sendSource,
+                                          ar.gain);
           }
         }
         channelBlockPeaks[channelIndex] =
@@ -2473,8 +2581,6 @@ public:
       // Chapter 15) run BEFORE the Main L/R Master Fader, 31-Band GEQ, Master
       // Insert, RTA, and Monitor tap so FX returns are properly controlled by
       // the Main L/R bus chain.
-      std::array<double, kAuxBusCapacity> masteredAuxDoubleSamples{};
-      std::array<float, kAuxBusCapacity> masteredAuxSamples{};
       for (int a = 0; a < kAuxBusCapacity; ++a) {
         const auto index = static_cast<size_t>(a);
         auxMasterGainSmooth[index] = nova::graviton::smoothGainStep(
@@ -2484,14 +2590,11 @@ public:
                                      ? auxMasterGainSmooth[index]
                                      : 0.0;
         masteredAuxDoubleSamples[index] = nova::graviton::applyBusMaster(
-            auxSums[index], auxMaster,
-            auxMuted[index].load(std::memory_order_relaxed));
-        if (auxIemLimiterEnabled[index].load(std::memory_order_relaxed)) {
-          const double ceilingDb = static_cast<double>(std::clamp(
-              auxIemCeilingDb.load(std::memory_order_relaxed), -24.0f, 0.0f));
-          const double ceilingLin = nova::graviton::dbToGain(ceilingDb);
-          masteredAuxDoubleSamples[index] = std::clamp(
-              masteredAuxDoubleSamples[index], -ceilingLin, ceilingLin);
+            auxSums[index], auxMaster, auxMutedBlock[index]);
+        if (auxIemLimiterEnabledBlock[index]) {
+          masteredAuxDoubleSamples[index] =
+              std::clamp(masteredAuxDoubleSamples[index],
+                         -auxIemCeilingLinBlock, auxIemCeilingLinBlock);
         }
         auxSums[index] = masteredAuxDoubleSamples[index];
         masteredAuxSamples[index] =
@@ -2616,7 +2719,6 @@ public:
                 matrixMasterTarget[static_cast<size_t>(m)], gainSmoothingCoeff);
       // Graviton Mk 2: Generalized adaptive matrix routing in 64-bit double
       // precision
-      std::array<double, kMatrixBusCapacity> matrixRawOutputs{};
       nova::graviton::processMatrixBusesAdaptive(matrixRawOutputs, left, right,
                                                  masteredAuxDoubleSamples,
                                                  activeMatrixRoutingSnapshot);
@@ -2699,14 +2801,13 @@ public:
       // 29)
       matrixPlusEngine.processMatrixFrame(matrixRawOutputs);
 
-      std::array<float, kMatrixBusCapacity> matrixSamples{};
       for (int m = 0; m < kMatrixBusCapacity; ++m) {
         const auto index = static_cast<size_t>(m);
         const double matrixGain = std::isfinite(matrixMasterGainSmooth[index])
                                       ? matrixMasterGainSmooth[index]
                                       : 0.0;
         matrixSamples[index] =
-            matrixMuted[index].load(std::memory_order_relaxed)
+            matrixMutedBlock[index]
                 ? 0.0f
                 : nova::graviton::toFloatBoundary(matrixRawOutputs[index] *
                                                   matrixGain);
@@ -2717,14 +2818,17 @@ public:
       const float matrix2 = matrixSamples[1];
 
       // Realistic Virtual 3D Surround Stereo Downmix to L/R (Woodworth ITD +
-      // HRTF Head-Shadow)
-      double binSurroundL = 0.0, binSurroundR = 0.0;
-      binauralPreviewSpatializer.processFrame(sampleSurroundOutputs, sr,
-                                              binSurroundL, binSurroundR);
-      left = nova::graviton::sanitize(left + binSurroundL);
-      right = nova::graviton::sanitize(right + binSurroundR);
-      finalMonL_A = nova::graviton::sanitize(finalMonL_A + binSurroundL);
-      finalMonR_A = nova::graviton::sanitize(finalMonR_A + binSurroundR);
+      // HRTF Head-Shadow) — skipped completely when no active channel uses 3D
+      // surround.
+      if (anySurroundActive) {
+        double binSurroundL = 0.0, binSurroundR = 0.0;
+        binauralPreviewSpatializer.processFrame(sampleSurroundOutputs, sr,
+                                                binSurroundL, binSurroundR);
+        left = nova::graviton::sanitize(left + binSurroundL);
+        right = nova::graviton::sanitize(right + binSurroundR);
+        finalMonL_A = nova::graviton::sanitize(finalMonL_A + binSurroundL);
+        finalMonR_A = nova::graviton::sanitize(finalMonR_A + binSurroundR);
+      }
 
       // Device callback, router, recorder and meters remain float-based.
       const float mainOutL = nova::graviton::toFloatBoundary(left);
@@ -3006,6 +3110,7 @@ public:
 
 private:
   double lastCallbackSampleRate = -1.0;
+  bool prevSurroundActive = false;
   double highPassAlpha = 0.0;
   float compressorAttack = 0.0f, compressorRelease = 0.0f;
   std::array<double, kLogicalChannels> highPassInput{};

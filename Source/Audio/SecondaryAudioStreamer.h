@@ -178,10 +178,17 @@ public:
     void audioDeviceAboutToStart(juce::AudioIODevice* device) override {
         engine.resetMonitorFifoStats();
         wasUnderflowing = false;
+        monitorPrimed = false;
+        lastOutSampleL = 0.0f;
+        lastOutSampleR = 0.0f;
+        smoothedSpeedRatio = 1.0;
         if (device != nullptr) {
             currentSampleRate = device->getCurrentSampleRate();
             currentBufferSize = device->getCurrentBufferSizeSamples();
-            const int maxNeeded = static_cast<int>(std::ceil(std::max(1024, currentBufferSize) * 4.0)) + 512;
+            const double engSrInit = engine.getSampleRate();
+            if (engSrInit > 1000.0 && currentSampleRate > 1000.0)
+                smoothedSpeedRatio = engSrInit / currentSampleRate;
+            const int maxNeeded = static_cast<int>(std::ceil(std::max(4096, currentBufferSize) * 4.0)) + 512;
             readBufferL.assign(static_cast<size_t>(maxNeeded), 0.0f);
             readBufferR.assign(static_cast<size_t>(maxNeeded), 0.0f);
             resampleBufferL.assign(static_cast<size_t>(maxNeeded), 0.0f);
@@ -193,6 +200,10 @@ public:
 
     void audioDeviceStopped() override {
         wasUnderflowing = false;
+        monitorPrimed = false;
+        lastOutSampleL = 0.0f;
+        lastOutSampleR = 0.0f;
+        smoothedSpeedRatio = 1.0;
         interpolatorL.reset();
         interpolatorR.reset();
     }
@@ -210,6 +221,9 @@ public:
         float* outR = (numOutputChannels > 1) ? outputChannelData[1] : nullptr;
 
         if (!enabled.load(std::memory_order_relaxed)) {
+            monitorPrimed = false;
+            lastOutSampleL = 0.0f;
+            lastOutSampleR = 0.0f;
             if (outL != nullptr) std::fill_n(outL, numSamples, 0.0f);
             if (outR != nullptr) std::fill_n(outR, numSamples, 0.0f);
             return;
@@ -220,18 +234,40 @@ public:
         const double validEngineSr = (engineSr > 1000.0) ? engineSr : secSr;
         const double nominalSpeedRatio = validEngineSr / secSr;
 
-        const int queuedSamples = engine.getMonitorFifoQueueDepth();
-        // Target elastic jitter buffer: ~8-16 ms (zero-crackle margin across 2 async WASAPI threads)
-        const int targetQueue = std::clamp(static_cast<int>(std::ceil(numSamples * nominalSpeedRatio * 2.0)), 384, 1024);
+        const int engBuf = std::max(64, engine.blockSize.load(std::memory_order_relaxed));
+        const int minBlock = std::max(engBuf, numSamples);
+        const int defaultTarget = (validEngineSr >= 88200.0) ? 2048 : 1024;
+        const int targetQueue = std::clamp(std::max(minBlock * 3, defaultTarget), 512, 8192);
 
-        // Emergency drain only if huge queue backlog accumulated (e.g. after long device stall)
-        if (queuedSamples > targetQueue + 1536) {
-            engine.discardMonitorSamples(queuedSamples - (targetQueue + 256));
-            interpolatorL.reset();
-            interpolatorR.reset();
+        int queuedSamples = engine.getMonitorFifoReady();
+        bool trimmedOverflow = false;
+
+        // Emergency drain when backlog exceeds 3x targetQueue: discard excess without resetting Lagrange history
+        if (queuedSamples > targetQueue * 3) {
+            const int discarded = engine.discardMonitorSamples(queuedSamples - targetQueue);
+            queuedSamples = engine.getMonitorFifoReady();
+            trimmedOverflow = (discarded > 0);
         }
 
-        // Elastic drift compensation (micro-adjust speed by +/- 0.05% to 0.4% without any audible pitch shift)
+        // Pre-fill watermark: wait until FIFO reaches targetQueue before pulling audio
+        if (!monitorPrimed) {
+            smoothedSpeedRatio = nominalSpeedRatio;
+            if (queuedSamples < targetQueue) {
+                for (int i = 0; i < numSamples; ++i) {
+                    lastOutSampleL *= 0.92f;
+                    lastOutSampleR *= 0.92f;
+                    if (outL != nullptr) outL[i] = lastOutSampleL;
+                    if (outR != nullptr) outR[i] = lastOutSampleR;
+                }
+                if (std::abs(lastOutSampleL) < 1.0e-7f) lastOutSampleL = 0.0f;
+                if (std::abs(lastOutSampleR) < 1.0e-7f) lastOutSampleR = 0.0f;
+                return;
+            }
+            monitorPrimed = true;
+            wasUnderflowing = true;
+        }
+
+        // Elastic drift compensation + one-pole smoothing to prevent ASRC pitch wobble across async WASAPI threads
         double driftAdjust = 0.0;
         const int diff = queuedSamples - targetQueue;
         if (diff > 24) {
@@ -239,55 +275,98 @@ public:
         } else if (diff < -24) {
             driftAdjust = -std::min(0.004, (-diff - 24) * 0.000015);
         }
-        const double speedRatio = nominalSpeedRatio * (1.0 + driftAdjust);
+        const double rawRatio = nominalSpeedRatio * (1.0 + driftAdjust);
+        if (std::abs(nominalSpeedRatio - smoothedSpeedRatio) > 0.05) {
+            smoothedSpeedRatio = rawRatio;
+        } else {
+            smoothedSpeedRatio += 0.02 * (rawRatio - smoothedSpeedRatio);
+        }
+        const double speedRatio = std::clamp(smoothedSpeedRatio, 0.25, 4.0);
 
         // Required input samples for Lagrange 4-point cubic polynomial interpolator
         const int neededEngineSamples = static_cast<int>(std::ceil(numSamples * speedRatio)) + 8;
         const int safeNeeded = std::min(neededEngineSamples, static_cast<int>(readBufferL.size()));
-
-        // Hysteresis after underrun: wait until FIFO pre-fills to 75% of targetQueue so it doesn't oscillate/crackle
-        const int minResumeSamples = wasUnderflowing ? std::max(neededEngineSamples, (targetQueue * 3) / 4) : neededEngineSamples;
         const int available = engine.peekMonitorSamples(readBufferL.data(), readBufferR.data(), safeNeeded);
 
-        if (available >= neededEngineSamples && queuedSamples >= minResumeSamples) {
-            const int usedL = interpolatorL.process(speedRatio, readBufferL.data(), (outL != nullptr ? outL : resampleBufferL.data()), numSamples);
-            const int usedR = interpolatorR.process(speedRatio, readBufferR.data(), (outR != nullptr ? outR : resampleBufferR.data()), numSamples);
-            const int consumed = std::max(usedL, usedR);
+        float* dstL = (outL != nullptr) ? outL : resampleBufferL.data();
+        float* dstR = (outR != nullptr) ? outR : resampleBufferR.data();
+        const bool dstEnough = (static_cast<int>(resampleBufferL.size()) >= numSamples);
+        if ((outL == nullptr || outR == nullptr) && !dstEnough) {
+            if (outL != nullptr) std::fill_n(outL, numSamples, 0.0f);
+            if (outR != nullptr) std::fill_n(outR, numSamples, 0.0f);
+            return;
+        }
+
+        if (available >= neededEngineSamples && safeNeeded >= neededEngineSamples) {
+            const int usedL = interpolatorL.process(speedRatio, readBufferL.data(), dstL, numSamples);
+            const int usedR = interpolatorR.process(speedRatio, readBufferR.data(), dstR, numSamples);
+            const int consumed = std::min(usedL, usedR);
             engine.advanceMonitorRead(consumed);
 
             if (wasUnderflowing) {
                 wasUnderflowing = false;
                 const int rampLen = std::min(64, numSamples);
                 for (int i = 0; i < rampLen; ++i) {
-                    const float gain = static_cast<float>(i + 1) / static_cast<float>(rampLen);
-                    if (outL != nullptr) outL[i] *= gain;
-                    if (outR != nullptr) outR[i] *= gain;
+                    const float alpha = static_cast<float>(i + 1) / static_cast<float>(rampLen);
+                    if (outL != nullptr) outL[i] = lastOutSampleL * (1.0f - alpha) + outL[i] * alpha;
+                    if (outR != nullptr) outR[i] = lastOutSampleR * (1.0f - alpha) + outR[i] * alpha;
+                }
+            } else if (trimmedOverflow) {
+                const int xfadeLen = std::min(32, numSamples);
+                for (int i = 0; i < xfadeLen; ++i) {
+                    const float alpha = static_cast<float>(i + 1) / static_cast<float>(xfadeLen);
+                    if (outL != nullptr) outL[i] = lastOutSampleL * (1.0f - alpha) + outL[i] * alpha;
+                    if (outR != nullptr) outR[i] = lastOutSampleR * (1.0f - alpha) + outR[i] * alpha;
                 }
             }
-        } else {
-            // Buffer underrun handling: soft smooth ramp to zero to eliminate clicking
+            lastOutSampleL = dstL[numSamples - 1];
+            lastOutSampleR = dstR[numSamples - 1];
+        } else if (available > 0) {
+            // Partial underrun: clamp interpolated output count strictly inside `available`
+            // so we never read stale history beyond readBuffer[available - 1], then decay exponentially.
             engine.recordMonitorUnderrun();
-            if (!wasUnderflowing) {
-                wasUnderflowing = true;
-                if (available > 6) {
-                    const int partL = interpolatorL.process(speedRatio, readBufferL.data(), (outL != nullptr ? outL : resampleBufferL.data()), numSamples);
-                    const int partR = interpolatorR.process(speedRatio, readBufferR.data(), (outR != nullptr ? outR : resampleBufferR.data()), numSamples);
-                    engine.advanceMonitorRead(std::max(partL, partR));
-                    const int rampLen = std::min(16, numSamples);
-                    for (int i = 0; i < rampLen; ++i) {
-                        const float gain = 1.0f - (static_cast<float>(i + 1) / static_cast<float>(rampLen));
-                        if (outL != nullptr) outL[i] *= gain;
-                        if (outR != nullptr) outR[i] *= gain;
+            monitorPrimed = false;
+            wasUnderflowing = true;
+
+            const int validOutSamples = std::clamp(
+                static_cast<int>(std::floor(static_cast<double>(available - 1) / speedRatio)),
+                0, numSamples);
+            if (validOutSamples > 0) {
+                const int partL = interpolatorL.process(speedRatio, readBufferL.data(), dstL, validOutSamples, available, 0);
+                const int partR = interpolatorR.process(speedRatio, readBufferR.data(), dstR, validOutSamples, available, 0);
+                engine.advanceMonitorRead(std::min(available, std::min(partL, partR)));
+                if (trimmedOverflow) {
+                    const int xfadeLen = std::min(32, validOutSamples);
+                    for (int i = 0; i < xfadeLen; ++i) {
+                        const float alpha = static_cast<float>(i + 1) / static_cast<float>(xfadeLen);
+                        if (outL != nullptr) outL[i] = lastOutSampleL * (1.0f - alpha) + outL[i] * alpha;
+                        if (outR != nullptr) outR[i] = lastOutSampleR * (1.0f - alpha) + outR[i] * alpha;
                     }
-                    if (numSamples > rampLen) {
-                        if (outL != nullptr) std::fill_n(outL + rampLen, numSamples - rampLen, 0.0f);
-                        if (outR != nullptr) std::fill_n(outR + rampLen, numSamples - rampLen, 0.0f);
-                    }
-                    return;
                 }
+                lastOutSampleL = dstL[validOutSamples - 1];
+                lastOutSampleR = dstR[validOutSamples - 1];
             }
-            if (outL != nullptr) std::fill_n(outL, numSamples, 0.0f);
-            if (outR != nullptr) std::fill_n(outR, numSamples, 0.0f);
+            for (int i = validOutSamples; i < numSamples; ++i) {
+                lastOutSampleL *= 0.92f;
+                lastOutSampleR *= 0.92f;
+                if (outL != nullptr) outL[i] = lastOutSampleL;
+                if (outR != nullptr) outR[i] = lastOutSampleR;
+            }
+            if (std::abs(lastOutSampleL) < 1.0e-7f) lastOutSampleL = 0.0f;
+            if (std::abs(lastOutSampleR) < 1.0e-7f) lastOutSampleR = 0.0f;
+        } else {
+            // Full underrun: trigger smooth exponential sample-hold decay and wait for watermark refill
+            engine.recordMonitorUnderrun();
+            monitorPrimed = false;
+            wasUnderflowing = true;
+            for (int i = 0; i < numSamples; ++i) {
+                lastOutSampleL *= 0.92f;
+                lastOutSampleR *= 0.92f;
+                if (outL != nullptr) outL[i] = lastOutSampleL;
+                if (outR != nullptr) outR[i] = lastOutSampleR;
+            }
+            if (std::abs(lastOutSampleL) < 1.0e-7f) lastOutSampleL = 0.0f;
+            if (std::abs(lastOutSampleR) < 1.0e-7f) lastOutSampleR = 0.0f;
         }
     }
 
@@ -301,6 +380,10 @@ private:
     double currentSampleRate{48000.0};
     int currentBufferSize{256};
     bool wasUnderflowing{false};
+    bool monitorPrimed{false};
+    double smoothedSpeedRatio{1.0};
+    float lastOutSampleL{0.0f};
+    float lastOutSampleR{0.0f};
 
     // Pre-allocated real-time scratch buffers (zero heap allocation in callback)
     std::vector<float> readBufferL;

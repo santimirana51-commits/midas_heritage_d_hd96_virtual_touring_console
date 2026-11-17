@@ -3,6 +3,7 @@
 #include "GUI/MainComponent.h"
 #include "MIDI/MixerMidiCallback.h"
 #include "Mixer/MixerEngine.h"
+#include <cmath>
 #include <fstream>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -150,22 +151,68 @@ private:
     if (sizes.isEmpty())
       return;
 
+    const auto typeName = deviceManager.getCurrentAudioDeviceType();
+    const bool isAsio = typeName.containsIgnoreCase("ASIO") ||
+                        dev->getTypeName().containsIgnoreCase("ASIO");
+    const double rawSr = dev->getCurrentSampleRate();
+    const double sr = (rawSr > 1000.0) ? rawSr : 48000.0;
+
     int targetBuf = 0;
-    if (sizes.contains(128)) {
-      targetBuf = 128;
-    } else {
-      int bestInRange = 999999;
-      int smallestAny = 999999;
-      for (int s : sizes) {
-        if (s >= 96 && s <= 256 && s < bestInRange)
-          bestInRange = s;
-        if (s >= 64 && s < smallestAny)
-          smallestAny = s;
+    if (isAsio) {
+      constexpr int asioTarget = 128;
+      if (sizes.contains(asioTarget)) {
+        targetBuf = asioTarget;
+      } else {
+        int bestInRange = 0;
+        int bestDist = 999999;
+        int smallestAny = 999999;
+        for (int s : sizes) {
+          if (s >= 96 && s <= 256) {
+            const int dist = std::abs(s - asioTarget);
+            if (bestInRange == 0 || dist < bestDist) {
+              bestInRange = s;
+              bestDist = dist;
+            }
+          }
+          if (s >= 64 && s < smallestAny)
+            smallestAny = s;
+        }
+        if (bestInRange > 0)
+          targetBuf = bestInRange;
+        else if (smallestAny < 999999)
+          targetBuf = smallestAny;
       }
-      if (bestInRange < 999999)
+    } else {
+      // Windows Audio / WASAPI shared mode schedules user-mode audiodg threads
+      // with ~3-10 ms jitter; tiny buffers (128 samples = 1.33 ms @ 96 kHz)
+      // cause continuous underrun crackling. Target a safe ~10 ms buffer.
+      const int wasapiTarget = (sr >= 88200.0) ? 960 : 480;
+      const int minCandidate = (sr >= 88200.0) ? 384 : 256;
+      const int maxCandidate = (sr >= 88200.0) ? 2048 : 1024;
+      int bestInRange = 0;
+      int bestDist = 999999;
+      int fallbackAboveMin = 999999;
+      int largestAny = 0;
+      for (int s : sizes) {
+        if (s >= minCandidate && s <= maxCandidate) {
+          const int dist = std::abs(s - wasapiTarget);
+          if (bestInRange == 0 || dist < bestDist ||
+              (dist == bestDist && s > bestInRange)) {
+            bestInRange = s;
+            bestDist = dist;
+          }
+        }
+        if (s >= minCandidate && s < fallbackAboveMin)
+          fallbackAboveMin = s;
+        if (s > largestAny)
+          largestAny = s;
+      }
+      if (bestInRange > 0)
         targetBuf = bestInRange;
-      else if (smallestAny < 999999)
-        targetBuf = smallestAny;
+      else if (fallbackAboveMin < 999999)
+        targetBuf = fallbackAboveMin;
+      else
+        targetBuf = largestAny;
     }
 
     auto setup = deviceManager.getAudioDeviceSetup();
