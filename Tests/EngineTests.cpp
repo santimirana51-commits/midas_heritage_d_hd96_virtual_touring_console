@@ -7279,6 +7279,71 @@ public:
       expect(launcher.isDefaultLayout(),
              "resetLayoutToDefault should restore default item and column order");
 
+      // 1d. Comp & Gate DSP envelope independence, continuity & HARDWARE GATE sync
+      {
+        nova::graviton::DynamicsProcessor dynIndep;
+        nova::graviton::DynamicsSettings indSet;
+        indSet.sampleRate = 48000.0;
+        indSet.gateEnabled = true;
+        indSet.compressorEnabled = true;
+        indSet.gateThresholdDb = -20.0;
+        indSet.gateRatio = 4.0;
+        indSet.compressorThresholdDb = -18.0;
+        indSet.compressorRatio = 4.0;
+        indSet.attackCoefficient = std::exp(-1.0 / (48000.0 * 0.250));
+        indSet.releaseCoefficient = std::exp(-1.0 / (48000.0 * 1.500));
+        indSet.gateAttackCoefficient = std::exp(-1.0 / (48000.0 * 0.001));
+        indSet.gateReleaseCoefficient = std::exp(-1.0 / (48000.0 * 0.050));
+        for (int i = 0; i < 48; ++i)
+          dynIndep.process(0.5, indSet);
+        expect(dynIndep.gateEnvelope() > dynIndep.envelope() * 2.0,
+               "Fast Gate envelope (1 ms) must remain independent of slow "
+               "Comp envelope (250 ms)");
+
+        // Monotonic transfer reduction across all CompressorModes (no step jump)
+        for (int m = 1; m <= 4; ++m) {
+          nova::graviton::DynamicsProcessor curveProc;
+          nova::graviton::DynamicsSettings curveSet;
+          curveSet.sampleRate = 48000.0;
+          curveSet.compressorEnabled = true;
+          curveSet.compressorMode =
+              static_cast<nova::graviton::CompressorMode>(m);
+          curveSet.compressorThresholdDb = -18.0;
+          curveSet.compressorRatio = 4.0;
+          curveSet.compressorKneeDb = 6.0;
+          curveSet.compressorKneeMode = 2;
+          curveSet.compressorRmsMs = 0.0;
+          curveSet.attackCoefficient = 0.0;
+          curveSet.releaseCoefficient = 0.0;
+          double prevRed = 0.0;
+          for (double db = -40.0; db <= 0.0; db += 0.5) {
+            const double amp = std::pow(10.0, db / 20.0);
+            const auto res = curveProc.process(amp, curveSet);
+            expect(res.compressorReductionDb + 1.0e-5 >= prevRed,
+                   "Compressor reduction must be continuous without downward step");
+            prevRed = res.compressorReductionDb;
+          }
+          expect(prevRed > 0.5, "Compressor mode must produce active reduction at 0 dB");
+        }
+      }
+
+      consoleSurface->getDedicatedDspPanel().selectHardwareModule(2);
+      expect(consoleSurface->getActiveGroup() == Group::Mix &&
+                 consoleSurface->getActiveSubPage() == 2,
+             "HARDWARE GATE must open Comp & Gate page");
+      expect(consoleSurface->getDynamicsPanel().isGateViewActive(),
+             "HARDWARE GATE must activate Gate sub-view in DynamicsPanel");
+      expect(consoleSurface->getDedicatedDspPanel().getFocusMode() ==
+                 MidasDedicatedDspPanel::FocusMode::Gate,
+             "Dedicated DSP panel focus mode must switch to Gate");
+
+      consoleSurface->getDedicatedDspPanel().selectHardwareModule(1);
+      expect(!consoleSurface->getDynamicsPanel().isGateViewActive(),
+             "HARDWARE DYN must return DynamicsPanel to Compressor curve view");
+      expect(consoleSurface->getDedicatedDspPanel().getFocusMode() ==
+                 MidasDedicatedDspPanel::FocusMode::Comp,
+             "Dedicated DSP panel focus mode must switch to Comp");
+
       // 2. State readout verification across all console parameters
       auto &ch = engine.channels[0];
       ch.gainDb.store(-3.5f, std::memory_order_relaxed);
@@ -7356,6 +7421,19 @@ public:
               "Output Right must remain finite during live parameter mutation");
         }
       }
+
+      // Simultaneous Gate (1ms/50ms) + Compressor (250ms/1500ms) engine block
+      ch.gateEnabled.store(true, std::memory_order_relaxed);
+      ch.gateThresholdDb.store(-30.0f, std::memory_order_relaxed);
+      ch.gateAttackMs.store(1.0f, std::memory_order_relaxed);
+      ch.gateReleaseMs.store(50.0f, std::memory_order_relaxed);
+      ch.compressorEnabled.store(true, std::memory_order_relaxed);
+      ch.compressorAttackMs.store(250.0f, std::memory_order_relaxed);
+      ch.compressorReleaseMs.store(1500.0f, std::memory_order_relaxed);
+      ch.gainDb.store(0.0f, std::memory_order_relaxed);
+      engine.processTestAudioBlock(inputs, 1, outputs, 2, blockSize);
+      expect(ch.dynamicsInDb.load(std::memory_order_relaxed) > -100.0f,
+             "Simultaneous Gate+Comp block must report finite dynamics telemetry");
 
       // Check final state integrity
       expect(std::isfinite(ch.gainDb.load()), "Final gainDb must be finite");

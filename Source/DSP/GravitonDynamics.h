@@ -40,7 +40,42 @@ struct DynamicsSettings {
   // attack/release.
   Sample attackCoefficient = 0.0;
   Sample releaseCoefficient = 0.0;
+  Sample gateAttackCoefficient = -1.0;
+  Sample gateReleaseCoefficient = -1.0;
 };
+
+inline void resolveEffectiveCompressorParams(CompressorMode mode,
+                                             Sample thresholdDb,
+                                             Sample ratio,
+                                             Sample &outThresholdDb,
+                                             Sample &outRatio) noexcept {
+  outThresholdDb = clampFinite(thresholdDb, -60.0, 0.0, -18.0);
+  outRatio = clampFinite(ratio, 1.0, 20.0, 4.0);
+  switch (mode) {
+  case CompressorMode::Adaptive:
+    // Optical 2A Tube: smooth program-dependent leveling with lower
+    // threshold & gentle ratio
+    outThresholdDb =
+        clampFinite(outThresholdDb - 2.0, -60.0, 0.0, outThresholdDb);
+    outRatio = clampFinite(outRatio * 0.85, 1.5, 10.0, 3.0);
+    break;
+  case CompressorMode::Creative:
+    // FET 76 All-Buttons: aggressive high-ratio slam
+    outThresholdDb =
+        clampFinite(outThresholdDb - 3.0, -60.0, 0.0, outThresholdDb);
+    outRatio = clampFinite(outRatio * 2.0, 1.0, 40.0, outRatio);
+    break;
+  case CompressorMode::Vintage:
+    // Vari-Mu Master Glue: smooth low-threshold bus glue
+    outThresholdDb = std::min(outThresholdDb, -20.0);
+    outRatio = std::min(outRatio, 6.0);
+    break;
+  case CompressorMode::Corrective:
+  case CompressorMode::Off:
+  default:
+    break;
+  }
+}
 
 struct DynamicsResult {
   Sample sample = 0.0;
@@ -72,6 +107,22 @@ public:
     const Sample inDb = gainToDb(std::max(std::abs(sample), 1.0e-6), -120.0);
     const Sample keySan = sanitize(keySignal);
     const Sample sideDb = gainToDb(std::max(std::abs(keySan), 1.0e-6), -120.0);
+
+    const Sample rawKeyTarget = std::max(std::abs(keySan), dbToGain(-120.0));
+    const Sample gAttCoeff =
+        (settings.gateAttackCoefficient >= 0.0)
+            ? clampFinite(settings.gateAttackCoefficient, 0.0, 1.0, 0.0)
+            : clampFinite(settings.attackCoefficient, 0.0, 1.0, 0.0);
+    const Sample gRelCoeff =
+        (settings.gateReleaseCoefficient >= 0.0)
+            ? clampFinite(settings.gateReleaseCoefficient, 0.0, 1.0, 0.0)
+            : clampFinite(settings.releaseCoefficient, 0.0, 1.0, 0.0);
+    const Sample gateCoeff =
+        (rawKeyTarget > gateEnvelope_) ? gAttCoeff : gRelCoeff;
+    gateEnvelope_ = sanitize(gateCoeff * gateEnvelope_ +
+                             (1.0 - gateCoeff) * rawKeyTarget);
+    const Sample gateEnvelopeDb =
+        gainToDb(std::max(gateEnvelope_, 1.0e-6), -120.0);
 
     Sample keyMag = std::abs(keySan);
     if (settings.compressorRmsMs > 0.05 && settings.sampleRate > 1000.0) {
@@ -128,10 +179,10 @@ public:
           gateReductionDb_ *= holdCoefficient;
           result.gateReductionDb = 0.0;
           sample *= dbToGain(attackBoostDb);
-        } else if (envelopeDb < threshold) {
+        } else if (gateEnvelopeDb < threshold) {
           // Gentle sustain/tail attenuation
           const Sample tailAttenDb =
-              clampFinite((threshold - envelopeDb) * 0.65, 0.0, rangeDb, 0.0);
+              clampFinite((threshold - gateEnvelopeDb) * 0.65, 0.0, rangeDb, 0.0);
           gateReductionDb_ = tailAttenDb > gateReductionDb_
                                  ? tailAttenDb
                                  : gateReductionDb_ * holdCoefficient +
@@ -147,9 +198,9 @@ public:
       } else if (settings.gateMode == GateMode::ExpanderDucker) {
         // Smooth downward expander: 1.5:1 - 2.5:1 gentle slope over wider range
         const Sample expanderKneeStart = threshold + 4.0;
-        if (envelopeDb < expanderKneeStart) {
+        if (gateEnvelopeDb < expanderKneeStart) {
           const Sample belowDb =
-              clampFinite(expanderKneeStart - envelopeDb, 0.0, 80.0, 0.0);
+              clampFinite(expanderKneeStart - gateEnvelopeDb, 0.0, 80.0, 0.0);
           const Sample gentleSlope =
               clampFinite(1.0 + (ratio - 1.0) * 0.25, 1.1, 3.0, 1.5);
           const Sample expRangeDb = std::max(rangeDb, 18.0);
@@ -166,9 +217,9 @@ public:
             gateReductionDb_ = 0.0;
           result.gateReductionDb = 0.0;
         }
-      } else if (envelopeDb < threshold) {
+      } else if (gateEnvelopeDb < threshold) {
         const Sample belowThresholdDb =
-            clampFinite(threshold - envelopeDb, 0.0, 80.0, 0.0);
+            clampFinite(threshold - gateEnvelopeDb, 0.0, 80.0, 0.0);
         const Sample attenuationDb =
             clampFinite(belowThresholdDb * ratio, 0.0, rangeDb, 0.0);
         gateReductionDb_ = attenuationDb > gateReductionDb_
@@ -197,35 +248,12 @@ public:
 
     if (settings.compressorEnabled &&
         settings.compressorMode != CompressorMode::Off) {
-      Sample threshold =
-          clampFinite(settings.compressorThresholdDb, -60.0, 0.0, -18.0);
-      Sample ratio = clampFinite(settings.compressorRatio, 1.0, 20.0, 4.0);
-      Sample effectiveThresholdDb = threshold;
-      Sample effectiveRatio = ratio;
-      switch (settings.compressorMode) {
-      case CompressorMode::Adaptive:
-        // Optical 2A Tube: smooth program-dependent leveling with lower
-        // threshold & gentle ratio
-        effectiveThresholdDb =
-            clampFinite(threshold - 2.0, -60.0, 0.0, threshold);
-        effectiveRatio = clampFinite(ratio * 0.85, 1.5, 10.0, 3.0);
-        break;
-      case CompressorMode::Creative:
-        // FET 76 All-Buttons: aggressive high-ratio slam
-        effectiveThresholdDb =
-            clampFinite(threshold - 3.0, -60.0, 0.0, threshold);
-        effectiveRatio = clampFinite(ratio * 2.0, 1.0, 40.0, ratio);
-        break;
-      case CompressorMode::Vintage:
-        // Vari-Mu Master Glue: smooth low-threshold bus glue
-        effectiveThresholdDb = std::min(threshold, -20.0);
-        effectiveRatio = std::min(ratio, 6.0);
-        break;
-      case CompressorMode::Corrective:
-      case CompressorMode::Off:
-      default:
-        break;
-      }
+      Sample effectiveThresholdDb = -18.0;
+      Sample effectiveRatio = 4.0;
+      resolveEffectiveCompressorParams(settings.compressorMode,
+                                       settings.compressorThresholdDb,
+                                       settings.compressorRatio,
+                                       effectiveThresholdDb, effectiveRatio);
 
       Sample kneeDb = clampFinite(settings.compressorKneeDb, 0.0, 24.0, 3.0);
       if (settings.compressorKneeMode == 0) // Hard
@@ -233,7 +261,7 @@ public:
 
       Sample reductionDb = 0.0;
       if (kneeDb <= 0.001) {
-        if (envelopeDb > threshold) {
+        if (envelopeDb > effectiveThresholdDb) {
           const Sample compressedDb =
               effectiveThresholdDb +
               (envelopeDb - effectiveThresholdDb) / effectiveRatio;
@@ -241,32 +269,25 @@ public:
         }
       } else {
         const Sample halfKnee = kneeDb * 0.5;
-        const Sample kneeStartDb = threshold - halfKnee;
-        const Sample kneeEndDb = threshold + halfKnee;
+        const Sample kneeStartDb = effectiveThresholdDb - halfKnee;
+        const Sample kneeEndDb = effectiveThresholdDb + halfKnee;
         if (envelopeDb > kneeStartDb) {
+          const Sample slope = 1.0 - (1.0 / effectiveRatio);
           if (envelopeDb >= kneeEndDb) {
             const Sample compressedDb =
                 effectiveThresholdDb +
                 (envelopeDb - effectiveThresholdDb) / effectiveRatio;
             reductionDb =
                 clampFinite(envelopeDb - compressedDb, 0.0, 60.0, 0.0);
-          } else if (settings.compressorKneeMode == 1) // Linear knee
-          {
-            const Sample t = (envelopeDb - kneeStartDb) / kneeDb;
-            const Sample slope = 1.0 - (1.0 / effectiveRatio);
-            reductionDb = clampFinite(
-                t * (envelopeDb - kneeStartDb) * slope * 0.5, 0.0, 60.0, 0.0);
-          } else // Soft knee
-          {
-            const Sample normalized =
-                clampFinite((envelopeDb - kneeStartDb) / kneeDb, 0.0, 1.0, 0.0);
-            const Sample softKneeDelta = (normalized * normalized) * halfKnee;
-            const Sample compressedDb =
-                effectiveThresholdDb +
-                (envelopeDb - effectiveThresholdDb) / effectiveRatio +
-                softKneeDelta;
+          } else if (settings.compressorKneeMode == 1) { // Linear knee
+            const Sample t = clampFinite((envelopeDb - kneeStartDb) / kneeDb,
+                                         0.0, 1.0, 0.0);
             reductionDb =
-                clampFinite(envelopeDb - compressedDb, 0.0, 60.0, 0.0);
+                clampFinite(t * halfKnee * slope, 0.0, 60.0, 0.0);
+          } else { // Smooth quadratic soft knee (C1-continuous at both bounds)
+            const Sample dist = envelopeDb - kneeStartDb;
+            reductionDb = clampFinite(
+                ((dist * dist) / (2.0 * kneeDb)) * slope, 0.0, 60.0, 0.0);
           }
         }
       }
@@ -289,15 +310,18 @@ public:
 
   void reset() noexcept {
     envelope_ = 0.0;
+    gateEnvelope_ = 0.0;
     gateReductionDb_ = 0.0;
     rmsState_ = 0.0;
     fastEnv_ = 0.0;
     slowEnv_ = 0.0;
   }
   Sample envelope() const noexcept { return envelope_; }
+  Sample gateEnvelope() const noexcept { return gateEnvelope_; }
 
 private:
   Sample envelope_ = 0.0;
+  Sample gateEnvelope_ = 0.0;
   Sample gateReductionDb_ = 0.0;
   Sample rmsState_ = 0.0;
   Sample fastEnv_ = 0.0;

@@ -340,8 +340,11 @@ public:
     btnScEnable.setColour(juce::TextButton::buttonOnColourId,
                           juce::Colour(0xff0ea5e9));
     btnScEnable.onClick = [this] {
-      current().sidechainSourceType.store(btnScEnable.getToggleState() ? 1 : 0,
-                                          std::memory_order_relaxed);
+      const int srcType = btnScEnable.getToggleState() ? 1 : 0;
+      current().sidechainSourceType.store(srcType, std::memory_order_relaxed);
+      syncStereoPartner([srcType](ChannelState &p) {
+        p.sidechainSourceType.store(srcType, std::memory_order_relaxed);
+      });
       repaint();
     };
     addAndMakeVisible(btnScEnable);
@@ -354,10 +357,19 @@ public:
       const int sel = scSourceSelector.getSelectedId();
       if (sel <= 1) {
         current().sidechainSourceType.store(0, std::memory_order_relaxed);
+        btnScEnable.setToggleState(false, juce::dontSendNotification);
+        syncStereoPartner([](ChannelState &p) {
+          p.sidechainSourceType.store(0, std::memory_order_relaxed);
+        });
       } else {
         current().sidechainSourceType.store(1, std::memory_order_relaxed);
         current().sidechainExternalChannel.store(sel - 2,
                                                  std::memory_order_relaxed);
+        btnScEnable.setToggleState(true, juce::dontSendNotification);
+        syncStereoPartner([sel](ChannelState &p) {
+          p.sidechainSourceType.store(1, std::memory_order_relaxed);
+          p.sidechainExternalChannel.store(sel - 2, std::memory_order_relaxed);
+        });
       }
       repaint();
     };
@@ -370,11 +382,74 @@ public:
     btnScListen.setColour(juce::TextButton::buttonOnColourId,
                           juce::Colour(0xfff59e0b));
     btnScListen.onClick = [this] {
-      current().sidechainKeyListen.store(btnScListen.getToggleState(),
-                                         std::memory_order_relaxed);
+      const bool listen = btnScListen.getToggleState();
+      current().sidechainKeyListen.store(listen, std::memory_order_relaxed);
       repaint();
     };
     addAndMakeVisible(btnScListen);
+
+    scFilterTypeSelector.addItem("SC Filter: Off", 1);
+    scFilterTypeSelector.addItem("SC: HPF", 2);
+    scFilterTypeSelector.addItem("SC: LPF", 3);
+    scFilterTypeSelector.addItem("SC: Bandpass", 4);
+    scFilterTypeSelector.addItem("SC: Notch", 5);
+    scFilterTypeSelector.setSelectedId(1, juce::dontSendNotification);
+    scFilterTypeSelector.setTooltip("Side-chain key filter type");
+    scFilterTypeSelector.onChange = [this] {
+      const int fType =
+          juce::jlimit(0, 4, scFilterTypeSelector.getSelectedId() - 1);
+      current().sidechainFilterType.store(fType, std::memory_order_relaxed);
+      syncStereoPartner([fType](ChannelState &p) {
+        p.sidechainFilterType.store(fType, std::memory_order_relaxed);
+      });
+      repaint();
+    };
+    addAndMakeVisible(scFilterTypeSelector);
+
+    scFreqSlider.setSliderStyle(juce::Slider::LinearBar);
+    scFreqSlider.setRange(20.0, 20000.0, 1.0);
+    scFreqSlider.setSkewFactorFromMidPoint(1000.0);
+    scFreqSlider.setNumDecimalPlacesToDisplay(0);
+    scFreqSlider.setTextValueSuffix(" Hz");
+    scFreqSlider.setTooltip("Side-chain key filter frequency (20 - 20000 Hz)");
+    scFreqSlider.setColour(juce::Slider::trackColourId, juce::Colour(0xff0284c7));
+    scFreqSlider.setColour(juce::Slider::backgroundColourId,
+                           juce::Colour(0xff182230));
+    scFreqSlider.setColour(juce::Slider::textBoxTextColourId,
+                           juce::Colour(0xffe2e8f0));
+    scFreqSlider.setColour(juce::Slider::textBoxOutlineColourId,
+                           juce::Colour(0xff334155));
+    scFreqSlider.onValueChange = [this] {
+      const float freq = static_cast<float>(scFreqSlider.getValue());
+      current().sidechainFilterFreqHz.store(freq, std::memory_order_relaxed);
+      syncStereoPartner([freq](ChannelState &p) {
+        p.sidechainFilterFreqHz.store(freq, std::memory_order_relaxed);
+      });
+      repaint();
+    };
+    addAndMakeVisible(scFreqSlider);
+
+    scQSlider.setSliderStyle(juce::Slider::LinearBar);
+    scQSlider.setRange(0.1, 10.0, 0.1);
+    scQSlider.setNumDecimalPlacesToDisplay(1);
+    scQSlider.setTextValueSuffix(" Q");
+    scQSlider.setTooltip("Side-chain key filter Q factor (0.1 - 10.0)");
+    scQSlider.setColour(juce::Slider::trackColourId, juce::Colour(0xff0ea5e9));
+    scQSlider.setColour(juce::Slider::backgroundColourId,
+                        juce::Colour(0xff182230));
+    scQSlider.setColour(juce::Slider::textBoxTextColourId,
+                        juce::Colour(0xffe2e8f0));
+    scQSlider.setColour(juce::Slider::textBoxOutlineColourId,
+                        juce::Colour(0xff334155));
+    scQSlider.onValueChange = [this] {
+      const float q = static_cast<float>(scQSlider.getValue());
+      current().sidechainFilterQ.store(q, std::memory_order_relaxed);
+      syncStereoPartner([q](ChannelState &p) {
+        p.sidechainFilterQ.store(q, std::memory_order_relaxed);
+      });
+      repaint();
+    };
+    addAndMakeVisible(scQSlider);
 
     // -------------------------------------------------------------------------
     // 6. GATE CONTROLS (QUICK ACCESS DRAWER)
@@ -396,6 +471,21 @@ public:
     };
     addChildComponent(btnGateActive);
 
+    gateModeSelector.addItem("Dual Gate", 1);
+    gateModeSelector.addItem("Transient Shaper", 2);
+    gateModeSelector.addItem("Expander / Ducker", 3);
+    gateModeSelector.setSelectedId(1, juce::dontSendNotification);
+    gateModeSelector.setTooltip("Select Gate / Expander DSP mode");
+    gateModeSelector.onChange = [this] {
+      const int gMode = juce::jlimit(0, 2, gateModeSelector.getSelectedId() - 1);
+      current().gateMode.store(gMode, std::memory_order_relaxed);
+      syncStereoPartner([gMode](ChannelState &p) {
+        p.gateMode.store(gMode, std::memory_order_relaxed);
+      });
+      repaint();
+    };
+    addChildComponent(gateModeSelector);
+
     knobGateThreshold = std::make_unique<NovaRotaryKnob>("G-THRESH", "dB",
                                                          -80.0f, 0.0f, -45.0f);
     knobGateThreshold->onValueChanged = [this](float v) {
@@ -403,6 +493,7 @@ public:
       syncStereoPartner([v](ChannelState &p) {
         p.gateThresholdDb.store(v, std::memory_order_relaxed);
       });
+      repaint();
     };
     addChildComponent(*knobGateThreshold);
 
@@ -413,6 +504,7 @@ public:
       syncStereoPartner([v](ChannelState &p) {
         p.gateRatio.store(v, std::memory_order_relaxed);
       });
+      repaint();
     };
     addChildComponent(*knobGateRatio);
 
@@ -424,6 +516,7 @@ public:
       syncStereoPartner([v](ChannelState &p) {
         p.gateAttackMs.store(v, std::memory_order_relaxed);
       });
+      repaint();
     };
     addChildComponent(*knobGateAttack);
 
@@ -435,6 +528,7 @@ public:
       syncStereoPartner([v](ChannelState &p) {
         p.gateHoldMs.store(v, std::memory_order_relaxed);
       });
+      repaint();
     };
     addChildComponent(*knobGateHold);
 
@@ -446,6 +540,7 @@ public:
       syncStereoPartner([v](ChannelState &p) {
         p.gateReleaseMs.store(v, std::memory_order_relaxed);
       });
+      repaint();
     };
     addChildComponent(*knobGateRelease);
 
@@ -464,6 +559,15 @@ public:
                                   juce::dontSendNotification);
     syncFromChannel();
   }
+
+  void setGateViewActive(bool active) {
+    showGateControls = active;
+    btnToggleGateView.setToggleState(active, juce::dontSendNotification);
+    resized();
+    repaint();
+  }
+
+  bool isGateViewActive() const noexcept { return showGateControls; }
 
   void syncFromChannel() {
     auto &s = current();
@@ -516,9 +620,23 @@ public:
     btnScListen.setToggleState(
         s.sidechainKeyListen.load(std::memory_order_relaxed),
         juce::dontSendNotification);
+    const int scFType = juce::jlimit(
+        0, 4, s.sidechainFilterType.load(std::memory_order_relaxed));
+    scFilterTypeSelector.setSelectedId(scFType + 1, juce::dontSendNotification);
+    scFreqSlider.setValue(
+        juce::jlimit(20.0f, 20000.0f,
+                     s.sidechainFilterFreqHz.load(std::memory_order_relaxed)),
+        juce::dontSendNotification);
+    scQSlider.setValue(
+        juce::jlimit(0.1f, 10.0f,
+                     s.sidechainFilterQ.load(std::memory_order_relaxed)),
+        juce::dontSendNotification);
 
     btnGateActive.setToggleState(s.gateEnabled.load(std::memory_order_relaxed),
                                  juce::dontSendNotification);
+    const int gMode =
+        juce::jlimit(0, 2, s.gateMode.load(std::memory_order_relaxed));
+    gateModeSelector.setSelectedId(gMode + 1, juce::dontSendNotification);
     knobGateThreshold->setValue(
         s.gateThresholdDb.load(std::memory_order_relaxed),
         juce::dontSendNotification);
@@ -538,6 +656,8 @@ public:
   // INTERACTIVE TRANSFER CURVE MOUSE DRAGGING
   // ---------------------------------------------------------------------------
   void mouseDown(const juce::MouseEvent &e) override {
+    if (showGateControls)
+      return;
     if (curveRect.contains(e.position)) {
       isDraggingThreshold = false;
       isDraggingRatio = false;
@@ -555,6 +675,8 @@ public:
   }
 
   void mouseDrag(const juce::MouseEvent &e) override {
+    if (showGateControls)
+      return;
     if (isDraggingThreshold) {
       const float newThresh =
           std::clamp(curveXToDb(e.position.x), -60.0f, 0.0f);
@@ -640,29 +762,101 @@ public:
                  juce::Justification::centredRight);
     }
 
+    // Divider & Section Label for Knee Mode Row
+    if (!optRowRect.isEmpty()) {
+      g.setFont(juce::Font(juce::FontOptions(10.5f, juce::Font::bold)));
+      g.setColour(juce::Colour(0xff94a3b8));
+      g.drawText("KNEE", static_cast<int>(optRowRect.getX() + 2.0f),
+                 static_cast<int>(optRowRect.getY()), 38,
+                 static_cast<int>(optRowRect.getHeight()),
+                 juce::Justification::centredLeft);
+    }
+
     // Divider Line above Sidechain
     g.setColour(juce::Colour(0xff15253b));
     g.drawHorizontalLine(static_cast<int>(sidechainBarRect.getY()), 8.0f,
-                         mainAreaW);
+                         mainAreaW + 8.0f);
 
     // Sidechain Header Title
-    g.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
+    g.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     g.setColour(juce::Colour(0xffcbd5e1));
-    g.drawText("SIDE-CHAIN", static_cast<int>(sidechainBarRect.getX() + 8.0f),
-               static_cast<int>(sidechainBarRect.getY() + 4.0f), 100, 22,
-               juce::Justification::centredLeft);
-    g.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::plain)));
-    g.setColour(juce::Colour(0xff64748b));
-    g.drawText("Side-chain input",
-               static_cast<int>(sidechainBarRect.getX() + 115.0f),
-               static_cast<int>(sidechainBarRect.getY() + 4.0f), 100, 22,
+    g.drawText("SIDE-CHAIN", static_cast<int>(sidechainBarRect.getX() + 6.0f),
+               static_cast<int>(sidechainBarRect.getY() + 2.0f), 78,
+               static_cast<int>(sidechainBarRect.getHeight() - 4.0f),
                juce::Justification::centredLeft);
 
-    // Draw Transfer Curve Display
-    drawTransferCurve(g);
+    // Draw Transfer Curve OR dedicated Gate Drawer (no visual overlap)
+    if (showGateControls)
+      drawGatePanel(g);
+    else
+      drawTransferCurve(g);
 
     // Draw Right Metering Panel
     drawMeters(g);
+  }
+
+  // ---------------------------------------------------------------------------
+  // DRAW NOISE GATE / EXPANDER DEDICATED PANEL
+  // ---------------------------------------------------------------------------
+  void drawGatePanel(juce::Graphics &g) {
+    if (curveRect.isEmpty())
+      return;
+
+    const auto &s = current();
+    const bool gateOn = s.gateEnabled.load(std::memory_order_relaxed);
+    const int gMode =
+        juce::jlimit(0, 2, s.gateMode.load(std::memory_order_relaxed));
+    const float gRDb = s.gateReductionDb.load(std::memory_order_relaxed);
+
+    g.setColour(juce::Colour(0xff09111c));
+    g.fillRect(curveRect);
+    g.setColour(gateOn ? juce::Colour(0xff10b981) : juce::Colour(0xff1e324d));
+    g.drawRect(curveRect, 1.2f);
+
+    auto hdr = curveRect.reduced(1.0f).removeFromTop(22.0f);
+    g.setColour(juce::Colour(0xff0f1c2b));
+    g.fillRect(hdr);
+
+    static const char *kModeLabels[3] = {"DUAL GATE", "TRANSIENT SHAPER",
+                                         "EXPANDER / DUCKER"};
+    g.setFont(juce::Font(juce::FontOptions(10.5f, juce::Font::bold)));
+    g.setColour(gateOn ? juce::Colour(0xff10b981) : juce::Colour(0xff94a3b8));
+    g.drawText("NOISE GATE / EXPANDER  |  " + juce::String(kModeLabels[gMode]),
+               static_cast<int>(hdr.getX() + 8.0f), static_cast<int>(hdr.getY()),
+               280, static_cast<int>(hdr.getHeight()),
+               juce::Justification::centredLeft);
+
+    juce::String stateText = "GATE BYPASSED";
+    juce::Colour stateCol(0xff64748b);
+    if (gateOn) {
+      if (gRDb > 0.25f) {
+        stateText = "GATING -" + juce::String(gRDb, 1) + " dB";
+        stateCol = juce::Colour(0xfff59e0b);
+      } else {
+        stateText = "GATE OPEN";
+        stateCol = juce::Colour(0xff10b981);
+      }
+    }
+    g.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
+    g.setColour(stateCol);
+    g.drawText(stateText, static_cast<int>(hdr.getRight() - 150.0f),
+               static_cast<int>(hdr.getY()), 142,
+               static_cast<int>(hdr.getHeight()),
+               juce::Justification::centredRight);
+
+    // Subtle column card guides below header
+    const float bodyY = curveRect.getY() + 24.0f;
+    const float bodyH = std::max(0.0f, curveRect.getBottom() - bodyY - 4.0f);
+    const float gateColW = (curveRect.getWidth() - 12.0f) / 6.0f;
+    for (int col = 0; col < 6; ++col) {
+      const float cx = curveRect.getX() + 6.0f + col * gateColW;
+      auto card = juce::Rectangle<float>(cx + 2.0f, bodyY + 2.0f,
+                                         gateColW - 4.0f, bodyH - 4.0f);
+      g.setColour(juce::Colour(0xff0d1828));
+      g.fillRoundedRectangle(card, 4.0f);
+      g.setColour(juce::Colour(0xff1a2b42));
+      g.drawRoundedRectangle(card, 4.0f, 0.8f);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -770,7 +964,10 @@ public:
       else
         curvePath.lineTo(px, py);
     }
-    g.setColour(juce::Colour(0xfff8fafc));
+    const bool compEnabled =
+        s.compressorEnabled.load(std::memory_order_relaxed);
+    g.setColour(compEnabled ? juce::Colour(0xfff8fafc)
+                            : juce::Colour(0xff64748b));
     g.strokePath(curvePath,
                  juce::PathStrokeType(2.5f, juce::PathStrokeType::curved,
                                       juce::PathStrokeType::rounded));
@@ -792,10 +989,22 @@ public:
       g.setColour(juce::Colours::white);
       g.drawEllipse(bx - 4.5f, by - 4.5f, 9.0f, 9.0f, 1.2f);
     }
+
+    if (!compEnabled) {
+      auto pill = juce::Rectangle<float>(curveRect.getX() + 8.0f,
+                                         curveRect.getY() + 6.0f, 68.0f, 18.0f);
+      g.setColour(juce::Colour(0xcc7f1d1d));
+      g.fillRoundedRectangle(pill, 4.0f);
+      g.setColour(juce::Colour(0xffef4444));
+      g.drawRoundedRectangle(pill, 4.0f, 1.0f);
+      g.setFont(juce::Font(juce::FontOptions(9.5f, juce::Font::bold)));
+      g.setColour(juce::Colours::white);
+      g.drawText("BYPASSED", pill.toNearestInt(), juce::Justification::centred);
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // DRAW RIGHT 4-COLUMN PRECISION METERING PANEL
+  // DRAW RIGHT 5-COLUMN PRECISION METERING PANEL (In, Side, Out, C-R, G-R)
   // ---------------------------------------------------------------------------
   void drawMeters(juce::Graphics &g) {
     if (meterBayRect.isEmpty())
@@ -812,49 +1021,58 @@ public:
     const float bayW = meterBayRect.getWidth();
     const float bayH = meterBayRect.getHeight();
 
-    // 4 Columns: In, Side, Out, R
+    // 5 Columns: In, Side, Out, C-R, G-R
     const float headerH = 22.0f;
     const float footerH = 24.0f;
-    const float barH = bayH - headerH - footerH;
+    const float barH = std::max(20.0f, bayH - headerH - footerH);
 
-    // Widths
-    const float colW = (bayW - 40.0f) / 4.0f;
+    // Widths: 8px left + 3 gaps(4) + scale(24) + 2px around scale + 8px right
     const float colGap = 4.0f;
+    const float scaleW = 24.0f;
+    const float colW = (bayW - 54.0f) / 5.0f;
 
     const float inX = bayX + 8.0f;
     const float sideX = inX + colW + colGap;
     const float outX = sideX + colW + colGap;
-    const float rX = bayX + bayW - colW - 8.0f;
-    const float scaleX = outX + colW + 2.0f;
+    const float scaleX = outX + colW + 1.0f;
+    const float crX = scaleX + scaleW + 1.0f;
+    const float grX = crX + colW + colGap;
 
     auto &s = current();
     const float inDb = s.dynamicsInDb.load(std::memory_order_relaxed);
     const float sideDb = s.dynamicsSideDb.load(std::memory_order_relaxed);
     const float outDb = s.dynamicsOutDb.load(std::memory_order_relaxed);
-    const float rDb =
+    const float cRDb =
         s.compressorGainReductionDb.load(std::memory_order_relaxed);
+    const float gRDb = s.gateReductionDb.load(std::memory_order_relaxed);
 
     // Smooth meter decay
     liveInDb = std::max(inDb, liveInDb * 0.90f);
     liveSideDb = std::max(sideDb, liveSideDb * 0.90f);
     liveOutDb = std::max(outDb, liveOutDb * 0.90f);
-    liveRDb = std::max(rDb, liveRDb * 0.88f);
+    liveRDb = std::max(cRDb, liveRDb * 0.88f);
+    liveGateRDb = std::max(gRDb, liveGateRDb * 0.88f);
 
     // Headers
-    g.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
+    g.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
     g.setColour(juce::Colour(0xffcbd5e1));
-    g.drawText("In", static_cast<int>(inX), static_cast<int>(bayY + 2.0f),
-               static_cast<int>(colW), static_cast<int>(headerH),
+    g.drawText("In", static_cast<int>(inX - 1.0f), static_cast<int>(bayY + 2.0f),
+               static_cast<int>(colW + 2.0f), static_cast<int>(headerH),
                juce::Justification::centred);
-    g.drawText("Side", static_cast<int>(sideX), static_cast<int>(bayY + 2.0f),
-               static_cast<int>(colW), static_cast<int>(headerH),
-               juce::Justification::centred);
-    g.drawText("Out", static_cast<int>(outX), static_cast<int>(bayY + 2.0f),
-               static_cast<int>(colW), static_cast<int>(headerH),
-               juce::Justification::centred);
-    g.drawText("R", static_cast<int>(rX), static_cast<int>(bayY + 2.0f),
-               static_cast<int>(colW), static_cast<int>(headerH),
-               juce::Justification::centred);
+    g.drawText("Side", static_cast<int>(sideX - 2.0f),
+               static_cast<int>(bayY + 2.0f), static_cast<int>(colW + 4.0f),
+               static_cast<int>(headerH), juce::Justification::centred);
+    g.drawText("Out", static_cast<int>(outX - 1.0f),
+               static_cast<int>(bayY + 2.0f), static_cast<int>(colW + 2.0f),
+               static_cast<int>(headerH), juce::Justification::centred);
+    g.setColour(juce::Colour(0xfff59e0b));
+    g.drawText("C-R", static_cast<int>(crX - 2.0f),
+               static_cast<int>(bayY + 2.0f), static_cast<int>(colW + 4.0f),
+               static_cast<int>(headerH), juce::Justification::centred);
+    g.setColour(juce::Colour(0xff10b981));
+    g.drawText("G-R", static_cast<int>(grX - 2.0f),
+               static_cast<int>(bayY + 2.0f), static_cast<int>(colW + 4.0f),
+               static_cast<int>(headerH), juce::Justification::centred);
 
     // Meter track background
     const auto drawMeterTrack = [&](float x) {
@@ -867,7 +1085,8 @@ public:
     drawMeterTrack(inX);
     drawMeterTrack(sideX);
     drawMeterTrack(outX);
-    drawMeterTrack(rX);
+    drawMeterTrack(crX);
+    drawMeterTrack(grX);
 
     // Draw In / Side / Out Level Bars
     const auto drawLevelBar = [&](float x, float dbVal, bool isOutput) {
@@ -896,45 +1115,52 @@ public:
     drawLevelBar(sideX, liveSideDb, false);
     drawLevelBar(outX, liveOutDb, true);
 
-    // Draw Gain Reduction (R) Bar: Moves DOWN from top (0 dB)
-    {
-      const float rNorm = std::clamp(liveRDb / 24.0f, 0.0f, 1.0f);
+    // Draw Gain Reduction (C-R & G-R) Bars: Move DOWN from top (0 dB)
+    const auto drawReductionBar = [&](float x, float redDb, float maxRangeDb,
+                                      juce::Colour barCol) {
+      const float rNorm = std::clamp(redDb / maxRangeDb, 0.0f, 1.0f);
       const float fillH = rNorm * barH;
       if (fillH > 1.0f) {
-        g.setColour(juce::Colour(0xffd97706)); // Amber / Gold reduction bar
-        g.fillRect(rX + 1.0f, bayY + headerH, colW - 2.0f, fillH);
+        g.setColour(barCol);
+        g.fillRect(x + 1.0f, bayY + headerH, colW - 2.0f, fillH);
       }
-    }
+    };
+    drawReductionBar(crX, liveRDb, 24.0f, juce::Colour(0xffd97706));
+    drawReductionBar(grX, liveGateRDb, 40.0f, juce::Colour(0xff10b981));
 
     // Scale markings in the middle
-    g.setFont(juce::Font(juce::FontOptions(8.5f, juce::Font::plain)));
+    g.setFont(juce::Font(juce::FontOptions(8.2f, juce::Font::plain)));
     g.setColour(juce::Colour(0xff64748b));
     static const int scaleMarks[] = {0, -10, -20, -30, -40, -50, -60, -70, -80};
     for (int sm : scaleMarks) {
       const float t = (float)(-sm) / 80.0f;
       const float sy = bayY + headerH + t * barH;
-      g.drawText(juce::String(sm), static_cast<int>(scaleX - 2.0f),
-                 static_cast<int>(sy - 5.0f), 24, 10,
+      g.drawText(juce::String(sm), static_cast<int>(scaleX),
+                 static_cast<int>(sy - 5.0f), static_cast<int>(scaleW), 10,
                  juce::Justification::centred);
     }
 
     // Numeric Readouts at footer
-    g.setFont(juce::Font(juce::FontOptions(9.5f, juce::Font::bold)));
+    g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
     g.setColour(juce::Colour(0xfff1f5f9));
     const float footY = bayY + headerH + barH + 4.0f;
-    g.drawText(formatDb(inDb), static_cast<int>(inX - 2.0f),
-               static_cast<int>(footY), static_cast<int>(colW + 4.0f), 14,
+    g.drawText(formatDb(inDb), static_cast<int>(inX - 3.0f),
+               static_cast<int>(footY), static_cast<int>(colW + 6.0f), 14,
                juce::Justification::centred);
-    g.drawText(formatDb(sideDb), static_cast<int>(sideX - 2.0f),
-               static_cast<int>(footY), static_cast<int>(colW + 4.0f), 14,
+    g.drawText(formatDb(sideDb), static_cast<int>(sideX - 3.0f),
+               static_cast<int>(footY), static_cast<int>(colW + 6.0f), 14,
                juce::Justification::centred);
-    g.drawText(formatDb(outDb), static_cast<int>(outX - 2.0f),
-               static_cast<int>(footY), static_cast<int>(colW + 4.0f), 14,
+    g.drawText(formatDb(outDb), static_cast<int>(outX - 3.0f),
+               static_cast<int>(footY), static_cast<int>(colW + 6.0f), 14,
                juce::Justification::centred);
     g.setColour(juce::Colour(0xfff59e0b));
-    g.drawText(rDb > 0.01f ? ("-" + juce::String(rDb, 1)) : "0.00",
-               static_cast<int>(rX - 2.0f), static_cast<int>(footY),
-               static_cast<int>(colW + 4.0f), 14, juce::Justification::centred);
+    g.drawText(cRDb > 0.01f ? ("-" + juce::String(cRDb, 1)) : "0.0",
+               static_cast<int>(crX - 3.0f), static_cast<int>(footY),
+               static_cast<int>(colW + 6.0f), 14, juce::Justification::centred);
+    g.setColour(juce::Colour(0xff10b981));
+    g.drawText(gRDb > 0.01f ? ("-" + juce::String(gRDb, 1)) : "0.0",
+               static_cast<int>(grX - 3.0f), static_cast<int>(footY),
+               static_cast<int>(colW + 6.0f), 14, juce::Justification::centred);
   }
 
   // ---------------------------------------------------------------------------
@@ -948,110 +1174,134 @@ public:
     const float w = area.getWidth();
     const float h = area.getHeight();
 
-    // 1. Toolbar Row
+    // 1. Responsive Toolbar Row (never collides with Active/Sleeping badge)
     const float tbH = 34.0f;
-    btnPresetMenu.setBounds(190, 4, 110, 26);
-    btnPrevPreset.setBounds(304, 4, 22, 26);
-    btnNextPreset.setBounds(328, 4, 22, 26);
-    btnRandom.setBounds(354, 4, 26, 26);
-    btnAddPreset.setBounds(382, 4, 22, 26);
-    btnAbCompare.setBounds(408, 4, 34, 26);
-    btnUndo.setBounds(446, 4, 42, 26);
-    btnRedo.setBounds(490, 4, 42, 26);
-    btnBypass.setBounds(536, 4, 52, 26);
-    btnSettings.setBounds(592, 4, 58, 26);
-    btnHelp.setBounds(654, 4, 24, 26);
+    const float tbStart = 180.0f;
+    const float tbMaxW = std::max(240.0f, w - 76.0f - tbStart);
+    const float tbScale = std::min(1.0f, tbMaxW / 494.0f);
+    float tx = tbStart;
+    const auto placeTb = [&](juce::Component &c, float baseW) {
+      const float bw = std::max(18.0f, baseW * tbScale);
+      c.setBounds(static_cast<int>(tx), 4, static_cast<int>(bw), 26);
+      tx += bw + 3.0f * tbScale;
+    };
+    placeTb(btnPresetMenu, 108.0f);
+    placeTb(btnPrevPreset, 22.0f);
+    placeTb(btnNextPreset, 22.0f);
+    placeTb(btnRandom, 26.0f);
+    placeTb(btnAddPreset, 22.0f);
+    placeTb(btnAbCompare, 34.0f);
+    placeTb(btnUndo, 42.0f);
+    placeTb(btnRedo, 42.0f);
+    placeTb(btnBypass, 52.0f);
+    placeTb(btnSettings, 58.0f);
+    placeTb(btnHelp, 24.0f);
 
     // Layout division: Left main controls & curve, Right metering bay
     const float pad = 8.0f;
-    const float meterW = std::clamp(w * 0.28f, 180.0f, 260.0f);
-    mainAreaW = w - meterW - pad * 3.0f;
+    const float meterW = std::clamp(w * 0.28f, 198.0f, 275.0f);
+    mainAreaW = std::max(320.0f, w - meterW - pad * 3.0f);
 
     meterBayRect = juce::Rectangle<float>(w - meterW - pad, tbH + pad, meterW,
-                                          h - tbH - pad * 2.0f);
+                                          std::max(80.0f, h - tbH - pad * 2.0f));
 
     // 2. Main 8 Knob Grid (Row 1 & Row 2)
     const float knobGridY = tbH + pad;
-    const float knobGridH = std::clamp(h * 0.36f, 130.0f, 180.0f);
-    const float colW = (mainAreaW - pad * 3.0f) / 4.0f;
+    const float knobGridH = std::clamp(h * 0.35f, 110.0f, 174.0f);
+    const float colW = mainAreaW * 0.25f;
     const float rowH = knobGridH * 0.5f;
 
     // Row 1: INPUT, OUTPUT, ATTACK, RELEASE
     knobInput->setBounds(static_cast<int>(pad), static_cast<int>(knobGridY),
-                         static_cast<int>(colW), static_cast<int>(rowH - 4.0f));
+                         static_cast<int>(colW), static_cast<int>(rowH - 2.0f));
     knobOutput->setBounds(static_cast<int>(pad + colW),
                           static_cast<int>(knobGridY), static_cast<int>(colW),
-                          static_cast<int>(rowH - 4.0f));
+                          static_cast<int>(rowH - 2.0f));
     knobAttack->setBounds(static_cast<int>(pad + colW * 2.0f),
                           static_cast<int>(knobGridY), static_cast<int>(colW),
-                          static_cast<int>(rowH - 4.0f));
+                          static_cast<int>(rowH - 2.0f));
     knobRelease->setBounds(static_cast<int>(pad + colW * 3.0f),
                            static_cast<int>(knobGridY), static_cast<int>(colW),
-                           static_cast<int>(rowH - 4.0f));
+                           static_cast<int>(rowH - 2.0f));
 
     // Row 2: RMS, THRESHOLD, RATIO, KNEE SIZE
     const float row2Y = knobGridY + rowH;
     knobRms->setBounds(static_cast<int>(pad), static_cast<int>(row2Y),
-                       static_cast<int>(colW), static_cast<int>(rowH - 4.0f));
+                       static_cast<int>(colW), static_cast<int>(rowH - 2.0f));
     knobThreshold->setBounds(static_cast<int>(pad + colW),
                              static_cast<int>(row2Y), static_cast<int>(colW),
-                             static_cast<int>(rowH - 4.0f));
+                             static_cast<int>(rowH - 2.0f));
     knobRatio->setBounds(static_cast<int>(pad + colW * 2.0f),
                          static_cast<int>(row2Y), static_cast<int>(colW),
-                         static_cast<int>(rowH - 4.0f));
+                         static_cast<int>(rowH - 2.0f));
     knobKnee->setBounds(static_cast<int>(pad + colW * 3.0f),
                         static_cast<int>(row2Y), static_cast<int>(colW),
-                        static_cast<int>(rowH - 4.0f));
+                        static_cast<int>(rowH - 2.0f));
 
-    // 3. Knee Mode & Options Row
+    // 3. Responsive Knee Mode & Options Row (never collides at any width)
     const float optY = knobGridY + knobGridH + 2.0f;
-    const float optH = 26.0f;
+    const float optH = 24.0f;
+    optRowRect = juce::Rectangle<float>(pad, optY, mainAreaW, optH);
 
-    // Knee mode segmented buttons (Hard, Linear, Soft)
-    const float kmBtnW = 54.0f;
-    btnKneeMode[0]->setBounds(static_cast<int>(pad + 65.0f),
-                              static_cast<int>(optY), static_cast<int>(kmBtnW),
-                              static_cast<int>(optH));
-    btnKneeMode[1]->setBounds(static_cast<int>(pad + 65.0f + kmBtnW + 2.0f),
-                              static_cast<int>(optY), static_cast<int>(kmBtnW),
-                              static_cast<int>(optH));
-    btnKneeMode[2]->setBounds(
-        static_cast<int>(pad + 65.0f + (kmBtnW + 2.0f) * 2.0f),
-        static_cast<int>(optY), static_cast<int>(kmBtnW),
+    const float kneeLabelW = 40.0f;
+    const float optAvailW = std::max(260.0f, mainAreaW - kneeLabelW);
+    const float optGaps = 2.0f * 4.0f + 6.0f * 2.0f;
+    const float unitW = (optAvailW - optGaps) / 8.75f;
+    float ox = pad + kneeLabelW;
+    for (int i = 0; i < 3; ++i) {
+      btnKneeMode[i]->setBounds(static_cast<int>(ox), static_cast<int>(optY),
+                                static_cast<int>(unitW * 1.0f),
+                                static_cast<int>(optH));
+      ox += unitW * 1.0f + 2.0f;
+    }
+    ox += 4.0f;
+    const auto placeOpt = [&](juce::Component &c, float weight, float extraGap) {
+      const float bw = unitW * weight;
+      c.setBounds(static_cast<int>(ox), static_cast<int>(optY),
+                  static_cast<int>(bw), static_cast<int>(optH));
+      ox += bw + extraGap;
+    };
+    placeOpt(btnLinkChannels, 1.35f, 3.0f);
+    placeOpt(btnMaximize, 1.45f, 3.0f);
+    placeOpt(btnCustomShape, 1.35f, 6.0f);
+    btnToggleGateView.setBounds(
+        static_cast<int>(ox), static_cast<int>(optY),
+        std::max(60, static_cast<int>(pad + mainAreaW - ox)),
         static_cast<int>(optH));
 
-    // Options toggles
-    const float linkX = pad + 65.0f + (kmBtnW + 2.0f) * 3.0f + 12.0f;
-    btnLinkChannels.setBounds(static_cast<int>(linkX), static_cast<int>(optY),
-                              94, static_cast<int>(optH));
-    btnMaximize.setBounds(static_cast<int>(linkX + 98.0f),
-                          static_cast<int>(optY), 108, static_cast<int>(optH));
-    btnCustomShape.setBounds(static_cast<int>(linkX + 210.0f),
-                             static_cast<int>(optY), 94,
-                             static_cast<int>(optH));
-    btnToggleGateView.setBounds(static_cast<int>(mainAreaW - 84.0f),
-                                static_cast<int>(optY), 84,
-                                static_cast<int>(optH));
-
-    // 4. Side-Chain Bar
-    const float scY = optY + optH + 6.0f;
-    const float scH = 28.0f;
+    // 4. Side-Chain Bar (Source + Listen + Key Filter Type/Freq/Q)
+    const float scY = optY + optH + 5.0f;
+    const float scH = 26.0f;
     sidechainBarRect = juce::Rectangle<float>(pad, scY, mainAreaW, scH);
 
-    btnScEnable.setBounds(static_cast<int>(pad + 220.0f),
-                          static_cast<int>(scY + 2.0f), 58, 24);
-    scSourceSelector.setBounds(static_cast<int>(pad + 282.0f),
-                               static_cast<int>(scY + 2.0f), 104, 24);
-    btnScListen.setBounds(static_cast<int>(pad + 390.0f),
-                          static_cast<int>(scY + 2.0f), 54, 24);
+    const float scLeftPad = 84.0f;
+    const float scAvail = std::max(220.0f, mainAreaW - scLeftPad);
+    const float scGaps = 3.0f * 5.0f;
+    const float scUnit = (scAvail - scGaps) / 7.25f;
+    float sx = pad + scLeftPad;
+    const auto placeSc = [&](juce::Component &c, float weight) {
+      const float bw = scUnit * weight;
+      c.setBounds(static_cast<int>(sx), static_cast<int>(scY + 2.0f),
+                  static_cast<int>(bw), static_cast<int>(scH - 4.0f));
+      sx += bw + 3.0f;
+    };
+    placeSc(btnScEnable, 0.85f);
+    placeSc(scSourceSelector, 1.55f);
+    placeSc(btnScListen, 0.85f);
+    placeSc(scFilterTypeSelector, 1.55f);
+    placeSc(scFreqSlider, 1.55f);
+    scQSlider.setBounds(static_cast<int>(sx), static_cast<int>(scY + 2.0f),
+                        std::max(38, static_cast<int>(pad + mainAreaW - sx)),
+                        static_cast<int>(scH - 4.0f));
 
-    // 5. Bottom Interactive Transfer Curve (or Gate Drawer if active)
+    // 5. Bottom Interactive Transfer Curve OR Gate Drawer
     const float curveY = scY + scH + 4.0f;
-    const float curveH = h - curveY - pad;
+    const float curveH = std::max(40.0f, h - curveY - pad);
     curveRect = juce::Rectangle<float>(pad, curveY, mainAreaW, curveH);
 
-    // Gate Controls Layout (Shown when Gate tab active)
+    // Gate Controls Layout (Shown exclusively in bottom panel when active)
     btnGateActive.setVisible(showGateControls);
+    gateModeSelector.setVisible(showGateControls);
     knobGateThreshold->setVisible(showGateControls);
     knobGateRatio->setVisible(showGateControls);
     knobGateAttack->setVisible(showGateControls);
@@ -1059,29 +1309,44 @@ public:
     knobGateRelease->setVisible(showGateControls);
 
     if (showGateControls) {
-      const float gateColW = (mainAreaW - pad * 2.0f) / 6.0f;
-      btnGateActive.setBounds(static_cast<int>(pad + 4.0f),
-                              static_cast<int>(curveY + 12.0f),
-                              static_cast<int>(gateColW - 8.0f), 30);
+      const float bodyY = curveY + 25.0f;
+      const float bodyH = std::max(32.0f, curveH - 29.0f);
+      const float gateColW = (mainAreaW - 12.0f) / 6.0f;
+      const float col0X = pad + 8.0f;
+      const float col0W = std::max(40.0f, gateColW - 6.0f);
+      const float toggleH = std::min(28.0f, bodyH * 0.44f);
+      const float modeH = std::min(24.0f, bodyH * 0.40f);
+      const float stackGap = std::max(4.0f, (bodyH - toggleH - modeH) * 0.25f);
+      const float stackY =
+          bodyY + std::max(2.0f, (bodyH - (toggleH + stackGap + modeH)) * 0.5f);
+
+      btnGateActive.setBounds(static_cast<int>(col0X), static_cast<int>(stackY),
+                              static_cast<int>(col0W), static_cast<int>(toggleH));
+      gateModeSelector.setBounds(
+          static_cast<int>(col0X),
+          static_cast<int>(stackY + toggleH + stackGap),
+          static_cast<int>(col0W), static_cast<int>(modeH));
+
+      const float startX = pad + 6.0f;
       knobGateThreshold->setBounds(
-          static_cast<int>(pad + gateColW), static_cast<int>(curveY + 6.0f),
-          static_cast<int>(gateColW), static_cast<int>(curveH - 12.0f));
-      knobGateRatio->setBounds(static_cast<int>(pad + gateColW * 2.0f),
-                               static_cast<int>(curveY + 6.0f),
-                               static_cast<int>(gateColW),
-                               static_cast<int>(curveH - 12.0f));
-      knobGateAttack->setBounds(static_cast<int>(pad + gateColW * 3.0f),
-                                static_cast<int>(curveY + 6.0f),
-                                static_cast<int>(gateColW),
-                                static_cast<int>(curveH - 12.0f));
-      knobGateHold->setBounds(static_cast<int>(pad + gateColW * 4.0f),
-                              static_cast<int>(curveY + 6.0f),
-                              static_cast<int>(gateColW),
-                              static_cast<int>(curveH - 12.0f));
-      knobGateRelease->setBounds(static_cast<int>(pad + gateColW * 5.0f),
-                                 static_cast<int>(curveY + 6.0f),
-                                 static_cast<int>(gateColW),
-                                 static_cast<int>(curveH - 12.0f));
+          static_cast<int>(startX + gateColW), static_cast<int>(bodyY + 2.0f),
+          static_cast<int>(gateColW), static_cast<int>(bodyH - 4.0f));
+      knobGateRatio->setBounds(
+          static_cast<int>(startX + gateColW * 2.0f),
+          static_cast<int>(bodyY + 2.0f), static_cast<int>(gateColW),
+          static_cast<int>(bodyH - 4.0f));
+      knobGateAttack->setBounds(
+          static_cast<int>(startX + gateColW * 3.0f),
+          static_cast<int>(bodyY + 2.0f), static_cast<int>(gateColW),
+          static_cast<int>(bodyH - 4.0f));
+      knobGateHold->setBounds(
+          static_cast<int>(startX + gateColW * 4.0f),
+          static_cast<int>(bodyY + 2.0f), static_cast<int>(gateColW),
+          static_cast<int>(bodyH - 4.0f));
+      knobGateRelease->setBounds(
+          static_cast<int>(startX + gateColW * 5.0f),
+          static_cast<int>(bodyY + 2.0f), static_cast<int>(gateColW),
+          static_cast<int>(bodyH - 4.0f));
     }
   }
 
@@ -1093,6 +1358,7 @@ private:
   juce::Rectangle<float> meterBayRect;
   juce::Rectangle<float> curveRect;
   juce::Rectangle<float> sidechainBarRect;
+  juce::Rectangle<float> optRowRect;
   float mainAreaW = 600.0f;
 
   // Toolbar widgets
@@ -1114,10 +1380,13 @@ private:
   // Side-Chain
   juce::TextButton btnScEnable, btnScListen;
   juce::ComboBox scSourceSelector;
+  juce::ComboBox scFilterTypeSelector;
+  juce::Slider scFreqSlider, scQSlider;
 
   // Gate Controls
   bool showGateControls = false;
   juce::TextButton btnGateActive;
+  juce::ComboBox gateModeSelector;
   std::unique_ptr<NovaRotaryKnob> knobGateThreshold, knobGateRatio,
       knobGateAttack, knobGateHold, knobGateRelease;
 
@@ -1130,6 +1399,7 @@ private:
   float liveSideDb = -80.0f;
   float liveOutDb = -80.0f;
   float liveRDb = 0.0f;
+  float liveGateRDb = 0.0f;
 
   // Parameter State Snapshot for Undo/Redo & A/B Compare
   struct DynamicsSnapshot {
@@ -1190,12 +1460,22 @@ private:
         s.compressorInputGainDb.load(std::memory_order_relaxed);
     const float makeupGain =
         s.compressorMakeupGainDb.load(std::memory_order_relaxed);
-    const float threshold =
+    const float rawThreshold =
         s.compressorThresholdDb.load(std::memory_order_relaxed);
-    const float ratio =
+    const float rawRatio =
         std::max(1.0f, s.compressorRatio.load(std::memory_order_relaxed));
+    const auto mode = static_cast<nova::graviton::CompressorMode>(
+        s.compressorMode.load(std::memory_order_relaxed));
     const float kneeDb = s.compressorKneeDb.load(std::memory_order_relaxed);
     const int kneeMode = s.compressorKneeMode.load(std::memory_order_relaxed);
+
+    nova::graviton::Sample effThresh64 = rawThreshold;
+    nova::graviton::Sample effRatio64 = rawRatio;
+    nova::graviton::resolveEffectiveCompressorParams(
+        mode, static_cast<nova::graviton::Sample>(rawThreshold),
+        static_cast<nova::graviton::Sample>(rawRatio), effThresh64, effRatio64);
+    const float threshold = static_cast<float>(effThresh64);
+    const float ratio = static_cast<float>(effRatio64);
 
     float effectiveInDb = inDb + inputGain;
     float outputDb = effectiveInDb;
@@ -1204,31 +1484,28 @@ private:
       if (effectiveInDb > threshold) {
         outputDb = threshold + (effectiveInDb - threshold) / ratio;
       }
-    } else { // Soft or Linear Knee
+    } else { // Soft or Linear Knee (C1 continuous)
       const float halfKnee = kneeDb * 0.5f;
       const float kneeStart = threshold - halfKnee;
       const float kneeEnd = threshold + halfKnee;
 
       if (effectiveInDb > kneeStart) {
+        const float slope = 1.0f - (1.0f / ratio);
         if (effectiveInDb >= kneeEnd) {
           outputDb = threshold + (effectiveInDb - threshold) / ratio;
-        } else if (kneeMode == 1) { // Linear
-          const float t = (effectiveInDb - kneeStart) / kneeDb;
-          const float slope = 1.0f - (1.0f / ratio);
-          outputDb =
-              effectiveInDb - (t * (effectiveInDb - kneeStart) * slope * 0.5f);
-        } else { // Soft Quadratic
-          const float norm =
-              std::clamp((effectiveInDb - kneeStart) / kneeDb, 0.0f, 1.0f);
-          const float softDelta = (norm * norm) * halfKnee;
-          outputDb =
-              threshold + (effectiveInDb - threshold) / ratio + softDelta;
+        } else if (kneeMode == 1) { // Linear Knee
+          const float t = std::clamp((effectiveInDb - kneeStart) / kneeDb,
+                                     0.0f, 1.0f);
+          outputDb = effectiveInDb - (t * halfKnee * slope);
+        } else { // Smooth Quadratic Soft Knee
+          const float dist = effectiveInDb - kneeStart;
+          outputDb = effectiveInDb - ((dist * dist) / (2.0f * kneeDb)) * slope;
         }
       }
     }
 
     if (s.compressorMaximize.load(std::memory_order_relaxed)) {
-      outputDb += std::max(0.0f, (-threshold) * (1.0f - 1.0f / ratio));
+      outputDb += std::max(0.0f, (-rawThreshold) * (1.0f - 1.0f / rawRatio));
     }
     outputDb += makeupGain;
     return outputDb;

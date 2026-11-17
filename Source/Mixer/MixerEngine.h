@@ -1648,30 +1648,25 @@ public:
            !channel.sidechainKeyListen.load(std::memory_order_relaxed))) {
         continue;
       }
-      const bool compressorForTiming =
-          channel.compressorEnabled.load(std::memory_order_relaxed);
-      const float attackMs =
-          compressorForTiming
-              ? juce::jlimit(
-                    0.1f, 100.0f,
-                    channel.compressorAttackMs.load(std::memory_order_relaxed))
-              : juce::jlimit(
-                    0.1f, 100.0f,
-                    channel.gateAttackMs.load(std::memory_order_relaxed));
-      const float releaseMs =
-          compressorForTiming
-              ? juce::jlimit(
-                    10.0f, 1000.0f,
-                    channel.compressorReleaseMs.load(std::memory_order_relaxed))
-              : juce::jlimit(
-                    10.0f, 1000.0f,
-                    channel.gateReleaseMs.load(std::memory_order_relaxed));
+      const float compAttackMs = juce::jlimit(
+          0.1f, 500.0f,
+          channel.compressorAttackMs.load(std::memory_order_relaxed));
+      const float compReleaseMs = juce::jlimit(
+          5.0f, 2000.0f,
+          channel.compressorReleaseMs.load(std::memory_order_relaxed));
+      const float gateAttackMs = juce::jlimit(
+          0.1f, 100.0f, channel.gateAttackMs.load(std::memory_order_relaxed));
+      const float gateReleaseMs = juce::jlimit(
+          10.0f, 1000.0f, channel.gateReleaseMs.load(std::memory_order_relaxed));
+      const double srSafe = std::max(1.0, static_cast<double>(sr));
       dynamicsAttackCoeff[static_cast<size_t>(c)] =
-          std::exp(-1.0 / (std::max(1.0, static_cast<double>(sr)) *
-                           static_cast<double>(attackMs) * 0.001));
+          std::exp(-1.0 / (srSafe * static_cast<double>(compAttackMs) * 0.001));
       dynamicsReleaseCoeff[static_cast<size_t>(c)] =
-          std::exp(-1.0 / (std::max(1.0, static_cast<double>(sr)) *
-                           static_cast<double>(releaseMs) * 0.001));
+          std::exp(-1.0 / (srSafe * static_cast<double>(compReleaseMs) * 0.001));
+      const double gateAttCoeff =
+          std::exp(-1.0 / (srSafe * static_cast<double>(gateAttackMs) * 0.001));
+      const double gateRelCoeff =
+          std::exp(-1.0 / (srSafe * static_cast<double>(gateReleaseMs) * 0.001));
       auto &dynamics = dynamicsSettingsBlock[static_cast<size_t>(c)];
       dynamics.gateEnabled = gateEnabledBlock[static_cast<size_t>(c)];
       dynamics.compressorEnabled =
@@ -1713,6 +1708,8 @@ public:
       dynamics.attackCoefficient = dynamicsAttackCoeff[static_cast<size_t>(c)];
       dynamics.releaseCoefficient =
           dynamicsReleaseCoeff[static_cast<size_t>(c)];
+      dynamics.gateAttackCoefficient = gateAttCoeff;
+      dynamics.gateReleaseCoefficient = gateRelCoeff;
       const int eqModel =
           std::clamp(channel.eqModel.load(std::memory_order_relaxed), 0, 3);
       for (int b = 0; b < 4; ++b) {

@@ -5101,6 +5101,11 @@ public:
     curMonAssigned = state.monitorAssigned.load(std::memory_order_relaxed);
     curMonPre = state.monitorPreFader.load(std::memory_order_relaxed);
     curMonSendDb = state.monitorSendDb.load(std::memory_order_relaxed);
+    curCompEnabled = state.compressorEnabled.load(std::memory_order_relaxed);
+    curGateEnabled = state.gateEnabled.load(std::memory_order_relaxed);
+    curCompRatio = state.compressorRatio.load(std::memory_order_relaxed);
+    curCompGrDb =
+        state.compressorGainReductionDb.load(std::memory_order_relaxed);
     preampKnob.setValue(state.inputGainDb.load(std::memory_order_relaxed),
                         juce::dontSendNotification);
     hpfKnob.setValue(state.highPassFreqHz.load(std::memory_order_relaxed),
@@ -5141,10 +5146,18 @@ public:
         g.drawText("4-BAND PEQ\nIN: 96kHz", x + 2.0f, 16.0f, tileW - 4.0f,
                    22.0f, juce::Justification::centred);
       } else if (i == 6) {
-        g.drawText("COMPRESSOR", x + 4.0f, 3.0f, tileW - 8.0f, 11.0f,
+        g.drawText("DYNAMICS", x + 4.0f, 3.0f, tileW - 8.0f, 11.0f,
                    juce::Justification::centred);
-        g.setColour(midas_colors::kAccentGold);
-        g.drawText("VCA 4:1\nGR: -4.2dB", x + 2.0f, 16.0f, tileW - 4.0f, 22.0f,
+        g.setColour(curCompEnabled ? midas_colors::kAccentGold
+                                   : midas_colors::kTextMuted);
+        const juce::String line1 =
+            (curCompEnabled ? "CMP " : "BYP ") + juce::String(curCompRatio, 1) +
+            ":1";
+        const juce::String grTxt =
+            curCompGrDb > 0.05f ? ("-" + juce::String(curCompGrDb, 1)) : "0.0";
+        const juce::String line2 =
+            "GR:" + grTxt + "dB | " + (curGateEnabled ? "GT:ON" : "GT:OFF");
+        g.drawText(line1 + "\n" + line2, x + 2.0f, 15.0f, tileW - 4.0f, 24.0f,
                    juce::Justification::centred);
       } else if (i == 7) {
         g.drawText("BUS ROUTING", x + 4.0f, 3.0f, tileW - 8.0f, 11.0f,
@@ -5271,7 +5284,11 @@ private:
   bool curMasterAssigned{true};
   bool curMonAssigned{true};
   bool curMonPre{false};
+  bool curCompEnabled{false};
+  bool curGateEnabled{false};
   float curMonSendDb{0.0f};
+  float curCompRatio{4.0f};
+  float curCompGrDb{0.0f};
   MidasKnob preampKnob, driveKnob, hpfKnob, delayKnob, panKnob;
   MidasTactileButton btn48V, btnPhase, btnHpf, btnDelay, btnPanLaw,
       btnSurround3D;
@@ -5409,6 +5426,19 @@ public:
     repaint();
   }
 
+  FocusMode getFocusMode() const noexcept { return currentFocus; }
+
+  void selectHardwareModule(int modIdx) {
+    if (modIdx == 0)
+      setFocusMode(FocusMode::Eq);
+    else if (modIdx == 1)
+      setFocusMode(FocusMode::Comp);
+    else if (modIdx == 2)
+      setFocusMode(FocusMode::Gate);
+    if (onHwModuleSelected)
+      onHwModuleSelected(modIdx);
+  }
+
   void syncChannel(const ChannelState &state) {
     lfKnob.setValue(state.eqGainDb[0].load(std::memory_order_relaxed),
                     juce::dontSendNotification);
@@ -5418,11 +5448,19 @@ public:
                      juce::dontSendNotification);
     hfKnob.setValue(state.eqGainDb[3].load(std::memory_order_relaxed),
                     juce::dontSendNotification);
-    dynThrKnob.setValue(
-        state.compressorThresholdDb.load(std::memory_order_relaxed),
-        juce::dontSendNotification);
-    dynRatioKnob.setValue(state.compressorRatio.load(std::memory_order_relaxed),
+    if (currentFocus == FocusMode::Gate) {
+      dynThrKnob.setValue(state.gateThresholdDb.load(std::memory_order_relaxed),
                           juce::dontSendNotification);
+      dynRatioKnob.setValue(state.gateRatio.load(std::memory_order_relaxed),
+                            juce::dontSendNotification);
+    } else {
+      dynThrKnob.setValue(
+          state.compressorThresholdDb.load(std::memory_order_relaxed),
+          juce::dontSendNotification);
+      dynRatioKnob.setValue(
+          state.compressorRatio.load(std::memory_order_relaxed),
+          juce::dontSendNotification);
+    }
     btnSipSafe.setToggleState(state.soloSafe.load(std::memory_order_relaxed),
                               juce::dontSendNotification);
     const bool isPfl = state.soloPfl.load(std::memory_order_relaxed);
@@ -5528,21 +5566,9 @@ public:
     btnHwGate.setBounds(static_cast<int>(8.0f + (hwModW + 2.0f) * 2.0f), 30,
                         static_cast<int>(hwModW), 20);
 
-    btnHwEq.onClick = [this] {
-      setFocusMode(FocusMode::Eq);
-      if (onHwModuleSelected)
-        onHwModuleSelected(0);
-    };
-    btnHwComp.onClick = [this] {
-      setFocusMode(FocusMode::Comp);
-      if (onHwModuleSelected)
-        onHwModuleSelected(1);
-    };
-    btnHwGate.onClick = [this] {
-      setFocusMode(FocusMode::Gate);
-      if (onHwModuleSelected)
-        onHwModuleSelected(2);
-    };
+    btnHwEq.onClick = [this] { selectHardwareModule(0); };
+    btnHwComp.onClick = [this] { selectHardwareModule(1); };
+    btnHwGate.onClick = [this] { selectHardwareModule(2); };
 
     // Row 3: 4-Band EQ Gain & Dynamics Knobs
     const float halfW = (w - 22.0f) * 0.5f;
@@ -10113,7 +10139,10 @@ public:
         dedicatedDsp.setFocusMode(MidasDedicatedDspPanel::FocusMode::Eq);
       } else if (activeSubPage == 2) {
         dynamicsPanelView.setVisible(true);
-        dedicatedDsp.setFocusMode(MidasDedicatedDspPanel::FocusMode::Comp);
+        dedicatedDsp.setFocusMode(
+            dynamicsPanelView.isGateViewActive()
+                ? MidasDedicatedDspPanel::FocusMode::Gate
+                : MidasDedicatedDspPanel::FocusMode::Comp);
       } else if (activeSubPage == 3) {
         const int chIdx = getEngineChannelForSlot(selectedSlot);
         juce::String chName = "IN " + juce::String(chIdx + 1);
@@ -10303,6 +10332,8 @@ public:
   }
 
   AndroidHomeLauncherView &getHomeLauncherView() { return homeLauncherView; }
+  DynamicsPanel &getDynamicsPanel() { return dynamicsPanelView; }
+  MidasDedicatedDspPanel &getDedicatedDspPanel() { return dedicatedDsp; }
 
   void switchTouchTab(int index) {
     if (index == 0)
@@ -10634,14 +10665,23 @@ private:
   }
 
   void setupInteractions() {
+    auto openDynamicsSubView = [this](bool showGate) {
+      dynamicsPanelView.setGateViewActive(showGate);
+      selectNav(MainNavGroup::Mix, 2);
+      dedicatedDsp.setFocusMode(
+          showGate ? MidasDedicatedDspPanel::FocusMode::Gate
+                   : MidasDedicatedDspPanel::FocusMode::Comp);
+      selectChannel(selectedSlot);
+    };
+
     // Quick Tile interactions
-    quickStrip.onQuickTileClicked = [this](int tabIdx) {
+    quickStrip.onQuickTileClicked = [this, openDynamicsSubView](int tabIdx) {
       if (tabIdx == 0)
         selectNav(MainNavGroup::Mix, 1); // Equaliser (PEQ & DYN)
       else if (tabIdx == 1)
-        selectNav(MainNavGroup::Mix, 2); // Dynamics (Comp)
+        openDynamicsSubView(false); // Dynamics (Comp)
       else if (tabIdx == 2)
-        selectNav(MainNavGroup::Mix, 2); // Dynamics (Gate)
+        openDynamicsSubView(true); // Dynamics (Gate)
       else if (tabIdx == 3)
         selectNav(MainNavGroup::Routing, 3); // Bus & Direct Routing
       else
@@ -10711,13 +10751,13 @@ private:
     };
 
     // Dedicated DSP HW Module Buttons & Monitor/Talkback/Macros (Fase 4)
-    dedicatedDsp.onHwModuleSelected = [this](int modIdx) {
+    dedicatedDsp.onHwModuleSelected = [this, openDynamicsSubView](int modIdx) {
       if (modIdx == 0)
         selectNav(MainNavGroup::Mix, 1); // Equaliser (PEQ & DYN)
       else if (modIdx == 1)
-        selectNav(MainNavGroup::Mix, 2); // Dynamics (Compressor)
+        openDynamicsSubView(false); // Dynamics (Compressor)
       else if (modIdx == 2)
-        selectNav(MainNavGroup::Mix, 2); // Dynamics (Gate)
+        openDynamicsSubView(true); // Dynamics (Gate)
     };
     dedicatedDsp.onEqGainChanged = [this](int band, float gain) {
       const int ch = getEngineChannelForSlot(selectedSlot);
@@ -10739,10 +10779,19 @@ private:
     dedicatedDsp.onDynChanged = [this](float thr, float ratio) {
       const int ch = getEngineChannelForSlot(selectedSlot);
       if (ch >= 0 && ch < static_cast<int>(engine.channels.size())) {
-        engine.channels[static_cast<size_t>(ch)].compressorThresholdDb.store(
-            thr, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].compressorRatio.store(
-            ratio, std::memory_order_relaxed);
+        auto &st = engine.channels[static_cast<size_t>(ch)];
+        if (dedicatedDsp.getFocusMode() ==
+            MidasDedicatedDspPanel::FocusMode::Gate) {
+          st.gateThresholdDb.store(juce::jlimit(-80.0f, 0.0f, thr),
+                                   std::memory_order_relaxed);
+          st.gateRatio.store(juce::jlimit(1.0f, 10.0f, ratio),
+                             std::memory_order_relaxed);
+        } else {
+          st.compressorThresholdDb.store(juce::jlimit(-60.0f, 0.0f, thr),
+                                         std::memory_order_relaxed);
+          st.compressorRatio.store(juce::jlimit(1.0f, 20.0f, ratio),
+                                   std::memory_order_relaxed);
+        }
         selectChannel(selectedSlot);
       }
     };
