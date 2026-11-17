@@ -1084,14 +1084,6 @@ public:
     juce::uint32 colorHex;
   };
 
-  struct QuickShortcutDef {
-    int groupIdx;
-    int subPage;
-    const char *label;
-    const char *catTag;
-    juce::uint32 colorHex;
-  };
-
   static const std::vector<PageDef> &getCatalog() {
     static const std::vector<PageDef> kCatalog = {
         // 0: MIX
@@ -1122,6 +1114,9 @@ public:
         {1, 3, "ROUTING", "BS", "Bus & Direct",
          "96 AUX / IEM Mix & Matrix Sends",
          "bus direct aux iem monitor wedge mix send matrix", 0xff0ea5e9},
+        {1, 4, "ROUTING", "GF", "Gang Fader",
+         "16-Group Channel Link & Ganging",
+         "gang fader link group channel relative absolute", 0xff38bdf8},
         // 2: FX
         {2, 0, "FX", "FX", "24-Slot Rack", "Virtual FX Rack & Reverbs",
          "fx rack reverb delay chorus pitch plate dvr2 nebula effects",
@@ -1141,6 +1136,9 @@ public:
          "scene overview quick recall tiles snapshot", 0xfff59e0b},
         {3, 4, "SHOW", "BC", "Broadcast Stems", "EBU R128 & Broadcast Bus",
          "broadcast stems lufs ebu r128 streaming feed", 0xfff59e0b},
+        {3, 5, "SHOW", "MC", "mCloud Sync",
+         "Cloud Showfile Sync & Backup",
+         "mcloud sync cloud showfile backup archive export", 0xff38bdf8},
         // 4: SYSTEM
         {4, 0, "SYSTEM", "AS", "ASIO Bridge", "Low-Latency ASIO Streamer",
          "asio bridge driver low latency daw streamer", 0xff38bdf8},
@@ -1318,13 +1316,6 @@ public:
         onPageSelected(matches[static_cast<size_t>(hit.second)]->groupIdx,
                        matches[static_cast<size_t>(hit.second)]->subPage);
       }
-    } else if (hit.first == 2) { // Quick shortcut
-      const auto shortcuts = getQuickShortcuts();
-      if (hit.second >= 0 &&
-          hit.second < static_cast<int>(shortcuts.size()) && onPageSelected) {
-        onPageSelected(shortcuts[static_cast<size_t>(hit.second)].groupIdx,
-                       shortcuts[static_cast<size_t>(hit.second)].subPage);
-      }
     } else if (hit.first == 3) { // Directory item
       const auto &cat = getCatalog();
       if (hit.second >= 0 && hit.second < static_cast<int>(cat.size()) &&
@@ -1352,7 +1343,7 @@ public:
     g.drawText("CONSOLE DIRECTORY", hdr.removeFromLeft(190.0f).toNearestInt(),
                juce::Justification::centredLeft);
 
-    inner.removeFromTop(6.0f);
+    inner.removeFromTop(8.0f);
 
     const auto q = searchBox.getText().trim();
     if (q.isNotEmpty()) {
@@ -1360,49 +1351,8 @@ public:
       return;
     }
 
-    // 1. Quick Access / Pinned Essential Shortcuts Strip
-    auto quickHdr = inner.removeFromTop(14.0f);
-    g.setFont(midas_ui::getFont(8.5f, true));
-    g.setColour(midas_colors::kTextMuted);
-    g.drawText("QUICK ACCESS  |  VIRTUAL CABLE, AUDIO HARDWARE, PATCH & REMOTE",
-               quickHdr.toNearestInt(), juce::Justification::centredLeft);
-    inner.removeFromTop(3.0f);
-
-    const auto shortcuts = getQuickShortcuts();
-    auto quickRow = inner.removeFromTop(34.0f);
-    const float qGap = 6.0f;
-    const float qW =
-        (quickRow.getWidth() - qGap * static_cast<float>(shortcuts.size() - 1)) /
-        static_cast<float>(shortcuts.size());
-    for (size_t i = 0; i < shortcuts.size(); ++i) {
-      auto pill = juce::Rectangle<float>(
-          quickRow.getX() + static_cast<float>(i) * (qW + qGap),
-          quickRow.getY(), qW, quickRow.getHeight());
-      const juce::Colour accent(shortcuts[i].colorHex);
-      const bool hov = (hoveredKind == 2 && hoveredIndex == static_cast<int>(i));
-      const bool isAct = (shortcuts[i].groupIdx == activeGroupIdx &&
-                          shortcuts[i].subPage == activeSubPageIdx);
-      g.setColour(hov ? juce::Colour(0xff1b2b42)
-                      : (isAct ? accent.withAlpha(0.18f)
-                               : juce::Colour(0xff121b2b)));
-      g.fillRoundedRectangle(pill, 7.0f);
-      g.setColour(isAct ? accent : accent.withAlpha(hov ? 0.9f : 0.42f));
-      g.drawRoundedRectangle(pill, 7.0f, (hov || isAct) ? 1.4f : 1.0f);
-
-      auto pIn = pill.reduced(7.0f, 3.0f);
-      g.setFont(midas_ui::getFont(7.5f, true));
-      g.setColour(accent);
-      g.drawText(shortcuts[i].catTag, pIn.removeFromTop(10.0f).toNearestInt(),
-                 juce::Justification::centredLeft, true);
-      g.setFont(midas_ui::getFont(10.0f, true));
-      g.setColour(juce::Colours::white);
-      g.drawText(shortcuts[i].label, pIn.toNearestInt(),
-                 juce::Justification::centredLeft, true);
-    }
-
-    inner.removeFromTop(8.0f);
-
-    // 2. Complete 5-Category Directory
+    // Complete 5-Category Directory (no duplicate shortcut row; starred items
+    // show a gold * badge in-place)
     static const char *catNames[5] = {"1. MIX", "2. ROUTING", "3. FX",
                                       "4. SHOW", "5. SYSTEM"};
     static const juce::uint32 catCols[5] = {0xff38bdf8, 0xff10b981, 0xfff59e0b,
@@ -1419,34 +1369,34 @@ public:
 
       g.setColour(juce::Colour(0xff0f1726));
       g.fillRoundedRectangle(colRect, 8.0f);
-      g.setColour(accent.withAlpha(0.28f));
+      g.setColour(accent.withAlpha(0.30f));
       g.drawRoundedRectangle(colRect, 8.0f, 1.0f);
 
-      auto colIn = colRect.reduced(6.0f, 5.0f);
-      auto colHdr = colIn.removeFromTop(20.0f);
+      auto colIn = colRect.reduced(6.0f, 6.0f);
+      auto colHdr = colIn.removeFromTop(22.0f);
       const bool hdrHov = (hoveredKind == 4 && hoveredIndex == grp);
       if (hdrHov) {
         g.setColour(accent.withAlpha(0.18f));
         g.fillRoundedRectangle(colHdr, 4.0f);
       }
-      g.setFont(midas_ui::getFont(10.0f, true));
+      g.setFont(midas_ui::getFont(10.5f, true));
       g.setColour(accent);
-      g.drawText(catNames[grp], colHdr.reduced(3.0f, 0.0f).toNearestInt(),
+      g.drawText(catNames[grp], colHdr.reduced(4.0f, 0.0f).toNearestInt(),
                  juce::Justification::centredLeft);
 
-      colIn.removeFromTop(3.0f);
+      colIn.removeFromTop(4.0f);
       std::vector<int> indices;
       for (size_t idx = 0; idx < cat.size(); ++idx) {
         if (cat[idx].groupIdx == grp)
           indices.push_back(static_cast<int>(idx));
       }
       const int itemCount = static_cast<int>(indices.size());
-      const float itemGap = 3.0f;
+      const float itemGap = 4.0f;
       const float maxRowH =
           (colIn.getHeight() -
            itemGap * static_cast<float>(std::max(0, itemCount - 1))) /
           static_cast<float>(std::max(1, itemCount));
-      const float rowH = juce::jlimit(18.0f, 34.0f, maxRowH);
+      const float rowH = juce::jlimit(22.0f, 44.0f, maxRowH);
 
       for (int r = 0; r < itemCount; ++r) {
         const int catIdx = indices[static_cast<size_t>(r)];
@@ -1461,20 +1411,30 @@ public:
         g.setColour(isHov ? juce::Colour(0xff1e2d45)
                           : (isAct ? itemAcc.withAlpha(0.20f)
                                    : juce::Colour(0xff141e2f)));
-        g.fillRoundedRectangle(rowRect, 5.0f);
+        g.fillRoundedRectangle(rowRect, 6.0f);
         g.setColour(isAct ? itemAcc
                           : (isHov ? itemAcc.withAlpha(0.75f)
                                    : juce::Colour(0xff223047)));
-        g.drawRoundedRectangle(rowRect, 5.0f, isAct ? 1.3f : 0.8f);
+        g.drawRoundedRectangle(rowRect, 6.0f, isAct ? 1.4f : 0.8f);
 
-        auto rIn = rowRect.reduced(5.0f, 2.0f);
+        auto rIn = rowRect.reduced(6.0f, 3.0f);
+        auto badgeRect =
+            rIn.removeFromLeft(24.0f).withSizeKeepingCentre(22.0f, 18.0f);
+        g.setColour(itemAcc.withAlpha(0.16f));
+        g.fillRoundedRectangle(badgeRect, 4.0f);
+        g.setFont(midas_ui::getFont(7.8f, true));
+        g.setColour(itemAcc);
+        g.drawText(item.badge, badgeRect.toNearestInt(),
+                   juce::Justification::centred);
+        rIn.removeFromLeft(5.0f);
+
         if (isFav) {
-          g.setFont(midas_ui::getFont(9.5f, true));
+          g.setFont(midas_ui::getFont(10.0f, true));
           g.setColour(midas_colors::kAccentGold);
           g.drawText("*", rIn.removeFromRight(12.0f).toNearestInt(),
                      juce::Justification::centred);
         }
-        g.setFont(midas_ui::getFont(9.5f, isAct || isHov));
+        g.setFont(midas_ui::getFont(10.0f, isAct || isHov));
         g.setColour(isAct ? juce::Colours::white : juce::Colour(0xffe2e8f0));
         g.drawText(item.title, rIn.toNearestInt(),
                    juce::Justification::centredLeft, true);
@@ -1486,37 +1446,6 @@ public:
   }
 
 private:
-  std::vector<QuickShortcutDef> getQuickShortcuts() const {
-    std::vector<QuickShortcutDef> list = {
-        {4, 2, "Virtual Cable", "SYSTEM > VBAN", 0xff38bdf8},
-        {4, 1, "Audio Hardware", "SYSTEM > I/O", 0xffa855f7},
-        {1, 0, "Patch Matrix", "ROUTING > PATCH", 0xff10b981},
-        {4, 3, "OSC Remote", "SYSTEM > 53000", 0xff10b981},
-        {3, 1, "64-Ch Recorder", "SHOW > WAV REC", 0xff38bdf8},
-        {0, 1, "Equaliser PEQ", "MIX > EQ/RTA", 0xfff59e0b},
-    };
-    // If user starred a custom favorite not already in the top 5, surface it
-    // in slot 6 so user favorites appear cleanly in Quick Access.
-    for (const auto &fk : favoriteKeys) {
-      bool alreadyListed = false;
-      for (size_t i = 0; i + 1 < list.size(); ++i) {
-        if (list[i].groupIdx == fk.first && list[i].subPage == fk.second) {
-          alreadyListed = true;
-          break;
-        }
-      }
-      if (!alreadyListed) {
-        for (const auto &p : getCatalog()) {
-          if (p.groupIdx == fk.first && p.subPage == fk.second) {
-            list.back() = {p.groupIdx, p.subPage, p.title, p.groupName,
-                           0xfffacc15};
-            return list;
-          }
-        }
-      }
-    }
-    return list;
-  }
 
   bool isFavorite(int grp, int sub) const {
     for (const auto &f : favoriteKeys) {
@@ -1599,12 +1528,11 @@ private:
 
   // Returns {kind, index}:
   //   kind 1 = search match index
-  //   kind 2 = quick shortcut index
   //   kind 3 = catalog index
   //   kind 4 = category header (groupIdx 0..4)
   std::pair<int, int> hitTest(juce::Point<float> p) const {
     auto inner = getLocalBounds().toFloat().reduced(12.0f, 8.0f);
-    inner.removeFromTop(32.0f);
+    inner.removeFromTop(34.0f);
 
     const auto q = searchBox.getText().trim();
     if (q.isNotEmpty()) {
@@ -1628,22 +1556,6 @@ private:
       return {-1, -1};
     }
 
-    inner.removeFromTop(17.0f);
-    const auto shortcuts = getQuickShortcuts();
-    auto quickRow = inner.removeFromTop(34.0f);
-    const float qGap = 6.0f;
-    const float qW =
-        (quickRow.getWidth() - qGap * static_cast<float>(shortcuts.size() - 1)) /
-        static_cast<float>(shortcuts.size());
-    for (size_t i = 0; i < shortcuts.size(); ++i) {
-      auto pill = juce::Rectangle<float>(
-          quickRow.getX() + static_cast<float>(i) * (qW + qGap),
-          quickRow.getY(), qW, quickRow.getHeight());
-      if (pill.contains(p))
-        return {2, static_cast<int>(i)};
-    }
-
-    inner.removeFromTop(8.0f);
     const float colGap = 7.0f;
     const float colW = (inner.getWidth() - colGap * 4.0f) / 5.0f;
     const auto &cat = getCatalog();
@@ -1652,24 +1564,24 @@ private:
       auto colRect = juce::Rectangle<float>(
           inner.getX() + static_cast<float>(grp) * (colW + colGap),
           inner.getY(), colW, inner.getHeight());
-      auto colIn = colRect.reduced(6.0f, 5.0f);
-      auto colHdr = colIn.removeFromTop(20.0f);
+      auto colIn = colRect.reduced(6.0f, 6.0f);
+      auto colHdr = colIn.removeFromTop(22.0f);
       if (colHdr.contains(p))
         return {4, grp};
 
-      colIn.removeFromTop(3.0f);
+      colIn.removeFromTop(4.0f);
       std::vector<int> indices;
       for (size_t idx = 0; idx < cat.size(); ++idx) {
         if (cat[idx].groupIdx == grp)
           indices.push_back(static_cast<int>(idx));
       }
       const int itemCount = static_cast<int>(indices.size());
-      const float itemGap = 3.0f;
+      const float itemGap = 4.0f;
       const float maxRowH =
           (colIn.getHeight() -
            itemGap * static_cast<float>(std::max(0, itemCount - 1))) /
           static_cast<float>(std::max(1, itemCount));
-      const float rowH = juce::jlimit(18.0f, 34.0f, maxRowH);
+      const float rowH = juce::jlimit(22.0f, 44.0f, maxRowH);
 
       for (int r = 0; r < itemCount; ++r) {
         const int catIdx = indices[static_cast<size_t>(r)];
@@ -5925,9 +5837,9 @@ public:
         btnSof("SOF: OFF", MidasTactileButton::GlowMode::Purple),
         btnEngine("AUDIO ENGINE: LIVE", MidasTactileButton::GlowMode::Green) {
 
-    // Midas AI, 3D Surround, Patch Matrix, and DSP Rack are now embedded
-    // directly in the touchscreen layers; do not show them on top bar to avoid
-    // duplicate buttons ("jangan doble")
+    // Midas AI, 3D Surround, Patch Matrix, DSP Rack, Gang Fader & mCloud Sync
+    // live inside the embedded touchscreen layer; hide from top status bar so
+    // there are no duplicate links.
     addChildComponent(btnAiModal);
     addChildComponent(btnSurroundModal);
     addChildComponent(btnPatchModal);
@@ -5942,8 +5854,8 @@ public:
       if (onOpenPatchMatrix)
         onOpenPatchMatrix();
     };
-    addAndMakeVisible(btnMCloudModal);
-    addAndMakeVisible(btnGangModal);
+    addChildComponent(btnMCloudModal);
+    addChildComponent(btnGangModal);
     addAndMakeVisible(btnTextScale);
     btnTextScale.setClickingTogglesState(false);
     addAndMakeVisible(btnQuickSettings);
@@ -6116,24 +6028,21 @@ public:
     btnPatchModal.setVisible(false);
     btnDspRack.setBounds(0, 0, 0, 0);
     btnDspRack.setVisible(false);
+    btnGangModal.setBounds(0, 0, 0, 0);
+    btnGangModal.setVisible(false);
+    btnMCloudModal.setBounds(0, 0, 0, 0);
+    btnMCloudModal.setVisible(false);
 
     const float midLeft = 484.0f;
-    const float midRight = std::max(midLeft + 240.0f, clockX - 430.0f);
+    const float midRight = std::max(midLeft + 140.0f, clockX - 430.0f);
     const float midAvail = midRight - midLeft;
-    const float scaleF = std::min(1.0f, midAvail / 334.0f);
-    const int wGang = static_cast<int>(88.0f * scaleF);
-    const int wCloud = static_cast<int>(94.0f * scaleF);
-    const int wText = static_cast<int>(84.0f * scaleF);
-    const int wQs = static_cast<int>(50.0f * scaleF);
-    const int gap = std::max(3, static_cast<int>(6.0f * scaleF));
-    int bx = static_cast<int>(midLeft);
-    btnGangModal.setBounds(bx, 5, wGang, 20);
-    bx += wGang + gap;
-    btnMCloudModal.setBounds(bx, 5, wCloud, 20);
-    bx += wCloud + gap;
+    const int wText = 90;
+    const int wQs = 56;
+    const int gap = 8;
+    const int bx = static_cast<int>(
+        midLeft + std::max(0.0f, (midAvail - static_cast<float>(wText + wQs + gap)) * 0.5f));
     btnTextScale.setBounds(bx, 5, wText, 20);
-    bx += wText + gap;
-    btnQuickSettings.setBounds(bx, 5, wQs, 20);
+    btnQuickSettings.setBounds(bx + wText + gap, 5, wQs, 20);
 
     btnTextScale.onClick = [this] { cycleTextScale(); };
 
@@ -6475,6 +6384,15 @@ class MidasGangFaderModal : public juce::Component {
 public:
   static constexpr int kMaxGroups = 16;
 
+  void setEmbedded(bool embedded) {
+    isEmbedded = embedded;
+    btnClose.setVisible(!embedded);
+    setAlwaysOnTop(!embedded);
+    resized();
+    repaint();
+  }
+  bool isEmbedded = false;
+
   MidasGangFaderModal()
       : btnClose("X", MidasTactileButton::GlowMode::Red),
         btnLink("LINK SELECTED", MidasTactileButton::GlowMode::Cyan),
@@ -6601,7 +6519,15 @@ public:
 
       if (onGroupsUpdated)
         onGroupsUpdated(groups, gIdx);
-      setVisible(false);
+      if (isEmbedded) {
+        lblHint.setColour(juce::Label::textColourId, juce::Colour(0xff10b981));
+        lblHint.setText("Link Group " + juce::String(gIdx + 1) +
+                            " aktif (" + juce::String(selectedCount) +
+                            " channel tersimpan).",
+                        juce::dontSendNotification);
+      } else {
+        setVisible(false);
+      }
     };
 
     btnUnlink.onClick = [this] {
@@ -6659,19 +6585,61 @@ public:
   }
 
   void paint(juce::Graphics &g) override {
-    g.fillAll(juce::Colours::black.withAlpha(0.75f));
-
     const auto bounds = getLocalBounds().toFloat();
-    const float dialogW = juce::jmin(500.0f, bounds.getWidth() - 24.0f);
-    const float dialogH = juce::jmin(540.0f, bounds.getHeight() - 24.0f);
-    auto dBox = juce::Rectangle<float>((bounds.getWidth() - dialogW) * 0.5f,
-                                       (bounds.getHeight() - dialogH) * 0.5f,
-                                       dialogW, dialogH);
+    if (!isEmbedded) {
+      g.fillAll(juce::Colours::black.withAlpha(0.75f));
+    } else {
+      g.fillAll(juce::Colour(0xff0b111a));
+    }
+
+    const float dialogW =
+        isEmbedded ? (bounds.getWidth() - 8.0f)
+                   : juce::jmin(500.0f, bounds.getWidth() - 24.0f);
+    const float dialogH =
+        isEmbedded ? (bounds.getHeight() - 6.0f)
+                   : juce::jmin(540.0f, bounds.getHeight() - 24.0f);
+    auto dBox =
+        isEmbedded
+            ? juce::Rectangle<float>(4.0f, 3.0f, dialogW, dialogH)
+            : juce::Rectangle<float>((bounds.getWidth() - dialogW) * 0.5f,
+                                     (bounds.getHeight() - dialogH) * 0.5f,
+                                     dialogW, dialogH);
 
     g.setColour(juce::Colour(0xff0d1420));
     g.fillRoundedRectangle(dBox, 10.0f);
     g.setColour(juce::Colour(0xff334155));
     g.drawRoundedRectangle(dBox, 10.0f, 1.2f);
+
+    if (isEmbedded) {
+      const float x = dBox.getX() + 14.0f;
+      const float y = dBox.getY() + 8.0f;
+      const float innerW = dialogW - 28.0f;
+
+      g.setFont(midas_ui::getFont(12.0f, true));
+      g.setColour(midas_colors::kAccentGold);
+      g.drawText("GANG FADER — 16-GROUP CHANNEL LINK", static_cast<int>(x),
+                 static_cast<int>(y), 320, 18, juce::Justification::centredLeft);
+
+      g.setFont(midas_ui::getFont(8.5f, true));
+      g.setColour(juce::Colour(0xff94a3b8));
+      g.drawText("GROUP ID", static_cast<int>(x), static_cast<int>(y + 22.0f),
+                 80, 18, juce::Justification::centredLeft);
+      g.drawText("MODE", static_cast<int>(x + 170.0f),
+                 static_cast<int>(y + 22.0f), 60, 18,
+                 juce::Justification::centredLeft);
+      g.drawText("PILIH CHANNEL (CH 1-" + juce::String(nova::kLogicalChannels) +
+                     ")",
+                 static_cast<int>(x), static_cast<int>(y + 72.0f), 260, 16,
+                 juce::Justification::centredLeft);
+
+      auto gridBox =
+          juce::Rectangle<float>(x, y + 90.0f, innerW, dialogH - 142.0f);
+      g.setColour(juce::Colour(0xff060b12));
+      g.fillRoundedRectangle(gridBox, 6.0f);
+      g.setColour(juce::Colour(0xff1e293b));
+      g.drawRoundedRectangle(gridBox, 6.0f, 1.0f);
+      return;
+    }
 
     const float x = dBox.getX() + 18.0f;
     const float y = dBox.getY() + 14.0f;
@@ -6711,6 +6679,68 @@ public:
 
   void resized() override {
     const auto bounds = getLocalBounds().toFloat();
+    if (isEmbedded) {
+      btnClose.setVisible(false);
+      const float dialogW = bounds.getWidth() - 8.0f;
+      const float dialogH = bounds.getHeight() - 6.0f;
+      const float x = 4.0f + 14.0f;
+      const float y = 3.0f + 8.0f;
+      const float innerW = dialogW - 28.0f;
+
+      groupCombo.setBounds(static_cast<int>(x + 70.0f),
+                           static_cast<int>(y + 21.0f), 90, 22);
+      modeCombo.setBounds(static_cast<int>(x + 218.0f),
+                          static_cast<int>(y + 21.0f), 110, 22);
+
+      const float pColW = innerW / 5.0f;
+      tglFader.setBounds(static_cast<int>(x), static_cast<int>(y + 47.0f),
+                         static_cast<int>(pColW), 22);
+      tglPreamp.setBounds(static_cast<int>(x + pColW),
+                          static_cast<int>(y + 47.0f), static_cast<int>(pColW),
+                          22);
+      tglPan.setBounds(static_cast<int>(x + pColW * 2.0f),
+                       static_cast<int>(y + 47.0f), static_cast<int>(pColW),
+                       22);
+      tglMute.setBounds(static_cast<int>(x + pColW * 3.0f),
+                        static_cast<int>(y + 47.0f), static_cast<int>(pColW),
+                        22);
+      tglSolo.setBounds(static_cast<int>(x + pColW * 4.0f),
+                        static_cast<int>(y + 47.0f), static_cast<int>(pColW),
+                        22);
+
+      btnSelectVisible.setBounds(static_cast<int>(x + innerW - 104.0f),
+                                 static_cast<int>(y + 70.0f), 104, 18);
+
+      const int gridH = static_cast<int>(dialogH - 142.0f);
+      chViewport.setBounds(static_cast<int>(x + 4.0f),
+                           static_cast<int>(y + 92.0f),
+                           static_cast<int>(innerW - 8.0f),
+                           std::max(40, gridH - 4));
+
+      const int cols = 8;
+      const int rows = (nova::kLogicalChannels + cols - 1) / cols;
+      const int viewW = static_cast<int>(innerW - 22.0f);
+      const int cellW = std::max(68, viewW / cols);
+      const int cellH = 24;
+      chGridContainer.setSize(cols * cellW, rows * cellH);
+      for (int i = 0; i < nova::kLogicalChannels; ++i) {
+        const int r = i / cols;
+        const int c = i % cols;
+        chToggles[static_cast<size_t>(i)]->setBounds(c * cellW + 4, r * cellH,
+                                                     cellW - 4, cellH);
+      }
+
+      const float btnY = 3.0f + dialogH - 36.0f;
+      btnLink.setBounds(static_cast<int>(x), static_cast<int>(btnY), 130, 26);
+      btnUnlink.setBounds(static_cast<int>(x + 138.0f), static_cast<int>(btnY),
+                          130, 26);
+      lblHint.setBounds(static_cast<int>(x + 278.0f), static_cast<int>(btnY),
+                        static_cast<int>(std::max(100.0f, innerW - 278.0f)),
+                        26);
+      return;
+    }
+
+    btnClose.setVisible(true);
     const float dialogW = juce::jmin(500.0f, bounds.getWidth() - 24.0f);
     const float dialogH = juce::jmin(540.0f, bounds.getHeight() - 24.0f);
     const float dx = (bounds.getWidth() - dialogW) * 0.5f;
@@ -8260,6 +8290,15 @@ private:
 // ==============================================================================
 class MidasMCloudModal : public juce::Component {
 public:
+  void setEmbedded(bool embedded) {
+    isEmbedded = embedded;
+    btnClose.setVisible(!embedded);
+    setAlwaysOnTop(!embedded);
+    resized();
+    repaint();
+  }
+  bool isEmbedded = false;
+
   MidasMCloudModal()
       : btnClose("X", MidasTactileButton::GlowMode::Red),
         btnSyncNow("SYNC SHOWFILE NOW", MidasTactileButton::GlowMode::Cyan),
@@ -8275,26 +8314,45 @@ public:
     btnSyncNow.onClick = [this] {
       if (onShowfileExport)
         onShowfileExport(false);
-      setVisible(false);
+      if (isEmbedded) {
+        statusBanner = "SYNC COMPLETE: Arena_Tour_2026_Main.m96";
+        repaint();
+      } else {
+        setVisible(false);
+      }
     };
     btnExportBackup.onClick = [this] {
       if (onShowfileExport)
         onShowfileExport(true);
-      setVisible(false);
+      if (isEmbedded) {
+        statusBanner = "OFFLINE BACKUP SAVED TO SHOW DIRECTORY";
+        repaint();
+      } else {
+        setVisible(false);
+      }
     };
   }
 
   std::function<void(bool isBackup)> onShowfileExport;
 
   void paint(juce::Graphics &g) override {
-    g.fillAll(juce::Colours::black.withAlpha(0.75f));
-
     const auto bounds = getLocalBounds().toFloat();
-    const float dialogW = 460.0f;
-    const float dialogH = 240.0f;
-    auto dBox = juce::Rectangle<float>((bounds.getWidth() - dialogW) * 0.5f,
-                                       (bounds.getHeight() - dialogH) * 0.5f,
-                                       dialogW, dialogH);
+    if (!isEmbedded) {
+      g.fillAll(juce::Colours::black.withAlpha(0.75f));
+    } else {
+      g.fillAll(juce::Colour(0xff0b111a));
+    }
+
+    const float dialogW =
+        isEmbedded ? (bounds.getWidth() - 8.0f) : 460.0f;
+    const float dialogH =
+        isEmbedded ? (bounds.getHeight() - 6.0f) : 240.0f;
+    auto dBox =
+        isEmbedded
+            ? juce::Rectangle<float>(4.0f, 3.0f, dialogW, dialogH)
+            : juce::Rectangle<float>((bounds.getWidth() - dialogW) * 0.5f,
+                                     (bounds.getHeight() - dialogH) * 0.5f,
+                                     dialogW, dialogH);
 
     g.setColour(midas_colors::kDeckBg);
     g.fillRoundedRectangle(dBox, 8.0f);
@@ -8305,29 +8363,48 @@ public:
     g.setColour(midas_colors::kAccentCyan);
     g.drawText("mCLOUD CONSOLE SYNC & SHOW ARCHIVE",
                static_cast<int>(dBox.getX() + 16.0f),
-               static_cast<int>(dBox.getY() + 12.0f), 350, 18,
+               static_cast<int>(dBox.getY() + 14.0f), 420, 20,
                juce::Justification::centredLeft);
 
-    g.setFont(midas_ui::getFont(8.5f, false));
+    g.setFont(midas_ui::getFont(10.0f, false));
     g.setColour(midas_colors::kAccentGreen);
-    g.drawText("CONNECTED: London Fast CDN Node - Latency: 14ms",
+    g.drawText(statusBanner.isNotEmpty()
+                   ? statusBanner
+                   : "CONNECTED: London Fast CDN Node - Latency: 14ms",
                static_cast<int>(dBox.getX() + 16.0f),
-               static_cast<int>(dBox.getY() + 40.0f), 380, 14,
+               static_cast<int>(dBox.getY() + 44.0f),
+               static_cast<int>(dialogW - 32.0f), 18,
                juce::Justification::centredLeft);
 
     g.setColour(midas_colors::kTextWhite);
     g.drawText("Active Showfile: Arena_Tour_2026_Main.m96",
                static_cast<int>(dBox.getX() + 16.0f),
-               static_cast<int>(dBox.getY() + 60.0f), 380, 14,
+               static_cast<int>(dBox.getY() + 68.0f),
+               static_cast<int>(dialogW - 32.0f), 18,
                juce::Justification::centredLeft);
     g.drawText("Multi-Console Mirroring: ENABLED (Mirror FOH to MON Console)",
                static_cast<int>(dBox.getX() + 16.0f),
-               static_cast<int>(dBox.getY() + 80.0f), 380, 14,
+               static_cast<int>(dBox.getY() + 92.0f),
+               static_cast<int>(dialogW - 32.0f), 18,
                juce::Justification::centredLeft);
   }
 
   void resized() override {
     const auto bounds = getLocalBounds().toFloat();
+    if (isEmbedded) {
+      btnClose.setVisible(false);
+      const float dialogW = bounds.getWidth() - 8.0f;
+      const float dialogH = bounds.getHeight() - 6.0f;
+      const float dx = 4.0f;
+      const float dy = 3.0f;
+      btnSyncNow.setBounds(static_cast<int>(dx + 16.0f),
+                           static_cast<int>(dy + dialogH - 44.0f), 190, 30);
+      btnExportBackup.setBounds(static_cast<int>(dx + 218.0f),
+                                static_cast<int>(dy + dialogH - 44.0f), 210, 30);
+      return;
+    }
+
+    btnClose.setVisible(true);
     const float dialogW = 460.0f;
     const float dialogH = 240.0f;
     const float dx = (bounds.getWidth() - dialogW) * 0.5f;
@@ -8342,6 +8419,7 @@ public:
   }
 
 private:
+  juce::String statusBanner;
   MidasTactileButton btnClose, btnSyncNow, btnExportBackup;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MidasMCloudModal)
@@ -8969,7 +9047,8 @@ public:
       }
     };
 
-    // 5 Main Group Buttons (Always reachable in Row 1)
+    // 5 Main Group Buttons (kept hidden - groups are accessed via Home
+    // Directory & Global Search to avoid top-bar clutter)
     static const char *grpNames[5] = {"MIX", "ROUTING", "FX", "SHOW",
                                       "SYSTEM"};
     static const MidasTactileButton::GlowMode grpGlows[5] = {
@@ -8980,18 +9059,19 @@ public:
     for (int i = 0; i < 5; ++i) {
       groupButtons[i] =
           std::make_unique<MidasTactileButton>(grpNames[i], grpGlows[i]);
-      addAndMakeVisible(*groupButtons[i]);
+      addChildComponent(*groupButtons[i]);
       const int gIdx = i;
       groupButtons[i]->onClick = [this, gIdx] {
         selectNav(static_cast<MainNavGroup>(gIdx), 0);
       };
     }
 
-    // Dynamic Context Sub-Tab Buttons (Row 2, up to 16 buttons)
+    // Dynamic Context Sub-Tab Buttons (hidden from top bar; navigation via Home
+    // Directory & Search)
     for (size_t i = 0; i < subTabButtons.size(); ++i) {
       subTabButtons[i] = std::make_unique<MidasTactileButton>(
           "", MidasTactileButton::GlowMode::Cyan);
-      addAndMakeVisible(*subTabButtons[i]);
+      addChildComponent(*subTabButtons[i]);
       const int sIdx = static_cast<int>(i);
       subTabButtons[i]->onClick = [this, sIdx] {
         selectNav(activeGroup, sIdx);
@@ -9019,12 +9099,14 @@ public:
     // Luxury Mahogany Armrest
     addAndMakeVisible(armrest);
 
-    // Modals & Embedded Modules
+    // Modals & Embedded Modules (all embedded inside touchscreen layer)
+    gangModal.setEmbedded(true);
     addChildComponent(gangModal);
     dspModal.setEmbedded(true);
     addChildComponent(dspModal);
     aiModal.setEmbedded(true);
     addChildComponent(aiModal);
+    mcloudModal.setEmbedded(true);
     addChildComponent(mcloudModal);
 
     setupInteractions();
@@ -9355,6 +9437,7 @@ public:
     surroundPanView.setVisible(false);
     vcaPanelView.setVisible(false);
     routingView.setVisible(false);
+    gangModal.setVisible(false);
 
     fxHostView.setVisible(false);
 
@@ -9362,6 +9445,8 @@ public:
     cuelistView.setVisible(false);
     recorderView.setVisible(false);
     offlineBounceView.setVisible(false);
+    broadcastView.setVisible(false);
+    mcloudModal.setVisible(false);
 
     asioBridgeView.setVisible(false);
     oscServerView.setVisible(false);
@@ -9369,7 +9454,6 @@ public:
     setupView.setVisible(false);
     if (audioDeviceSelector)
       audioDeviceSelector->setVisible(false);
-    broadcastView.setVisible(false);
 
     // 3. Define and show active subpage
     updateSubTabs();
@@ -9416,7 +9500,8 @@ public:
       defs = {{"PATCH MATRIX", MidasTactileButton::GlowMode::Green},
               {"3D SURROUND", MidasTactileButton::GlowMode::Cyan},
               {"VCA GROUPS", MidasTactileButton::GlowMode::Gold},
-              {"BUS & DIRECT", MidasTactileButton::GlowMode::Cyan}};
+              {"BUS & DIRECT", MidasTactileButton::GlowMode::Cyan},
+              {"GANG FADER", MidasTactileButton::GlowMode::Cyan}};
       activeSubPage = juce::jlimit(0, (int)defs.size() - 1, activeSubPage);
       if (activeSubPage == 0)
         patchMatrixView.setVisible(true);
@@ -9426,6 +9511,13 @@ public:
         vcaPanelView.setVisible(true);
       else if (activeSubPage == 3)
         routingView.setVisible(true);
+      else if (activeSubPage == 4) {
+        std::array<int, 8> vis{};
+        for (int s = 0; s < 8; ++s)
+          vis[static_cast<size_t>(s)] = getEngineChannelForSlot(s);
+        gangModal.setVisibleChannels(vis);
+        gangModal.setVisible(true);
+      }
     } else if (activeGroup == MainNavGroup::Fx) {
       defs = {{"24-SLOT RACK", MidasTactileButton::GlowMode::Gold},
               {"DSP MODELS", MidasTactileButton::GlowMode::Cyan}};
@@ -9442,7 +9534,8 @@ public:
               {"64-CH RECORDER", MidasTactileButton::GlowMode::Cyan},
               {"OFFLINE BOUNCE", MidasTactileButton::GlowMode::Purple},
               {"SCENE OVERVIEW", MidasTactileButton::GlowMode::Gold},
-              {"BROADCAST STEMS", MidasTactileButton::GlowMode::Gold}};
+              {"BROADCAST STEMS", MidasTactileButton::GlowMode::Gold},
+              {"mCLOUD SYNC", MidasTactileButton::GlowMode::Cyan}};
       activeSubPage = juce::jlimit(0, (int)defs.size() - 1, activeSubPage);
       if (activeSubPage == 0)
         fullCueListView.setVisible(true);
@@ -9454,6 +9547,8 @@ public:
         cuelistView.setVisible(true);
       else if (activeSubPage == 4)
         broadcastView.setVisible(true);
+      else if (activeSubPage == 5)
+        mcloudModal.setVisible(true);
     } else if (activeGroup == MainNavGroup::System) {
       // Grouped: Audio I/O (0-2) | Remote (3) | Setup (4)
       defs = {{"ASIO BRIDGE", MidasTactileButton::GlowMode::Cyan},
@@ -9475,17 +9570,9 @@ public:
         setupView.setVisible(true);
     }
 
-    for (size_t i = 0; i < subTabButtons.size(); ++i) {
-      if (static_cast<int>(i) < (int)defs.size()) {
-        subTabButtons[i]->setVisible(true);
-        subTabButtons[i]->setButtonText(defs[i].label);
-        subTabButtons[i]->setGlowMode(defs[i].glow);
-        subTabButtons[i]->setToggleState(static_cast<int>(i) == activeSubPage,
-                                         juce::dontSendNotification);
-      } else {
-        subTabButtons[i]->setVisible(false);
-      }
-    }
+    // Circled group/sub-tab bars removed from touchscreen header
+    for (size_t i = 0; i < subTabButtons.size(); ++i)
+      subTabButtons[i]->setVisible(false);
 
     if (activeSubPage >= 0 && activeSubPage < static_cast<int>(defs.size())) {
       static const char *grpTags[5] = {"MIX", "ROUTING", "FX", "SHOW",
@@ -9638,12 +9725,7 @@ public:
     g.setColour(midas_colors::kBorderCol);
     g.drawRoundedRectangle(touchRect, 10.0f, 1.2f);
 
-    // Header separator between Row 1 (Group/Breadcrumb/Nav) & Row 2 (Sub-tabs)
-    g.setColour(juce::Colour(0xff142033));
-    g.drawHorizontalLine(static_cast<int>(topY + 26.0f), 12.0f,
-                         touchW - 4.0f);
-
-    // Persistent Location Breadcrumb Pill
+    // Persistent Location Breadcrumb Pill (Single Clean Header Row)
     if (breadcrumbBounds.getWidth() > 54) {
       const bool inHome = homeLauncherView.isVisible();
       const bool inRecent = recentView.isVisible();
@@ -9661,8 +9743,8 @@ public:
       g.drawRoundedRectangle(bRect, 5.0f, 1.0f);
       g.setFont(midas_ui::getFont(9.5f, true));
       g.setColour(pillAcc);
-      g.drawText(pillText, breadcrumbBounds.reduced(6, 0),
-                 juce::Justification::centred, true);
+      g.drawText(pillText, breadcrumbBounds.reduced(8, 0),
+                 juce::Justification::centredLeft, true);
     }
 
     // Chassis Corner Screws (Reference Hardware Touring Deck Inset)
@@ -9711,12 +9793,27 @@ public:
 
     dedicatedDsp.setVisible(!isWideTouchGroup);
 
-    // Row 1: Always-accessible Main Groups (Left, or Menu drawer on narrow
-    // screens) + Breadcrumb Pill (Center) + Back/Home/Find/Fav/Recent (Right)
-    const float row1Y = topY + 3.0f;
+    // Single Clean Touchscreen Header: Location Breadcrumb (Left) +
+    // Back/Home/Find/Fav/Recent (Right); group & sub-tab bars hidden
+    const float row1Y = topY + 4.0f;
     const float rowH = 22.0f;
     const float navAreaW = 262.0f;
     const float navX = touchW - navAreaW + 2.0f;
+
+    btnNavMenu.setVisible(false);
+    btnNavMenu.setBounds(0, 0, 0, 0);
+    for (int i = 0; i < 5; ++i) {
+      if (groupButtons[i] != nullptr) {
+        groupButtons[i]->setVisible(false);
+        groupButtons[i]->setBounds(0, 0, 0, 0);
+      }
+    }
+    for (size_t i = 0; i < subTabButtons.size(); ++i) {
+      if (subTabButtons[i] != nullptr) {
+        subTabButtons[i]->setVisible(false);
+        subTabButtons[i]->setBounds(0, 0, 0, 0);
+      }
+    }
 
     btnNavBack.setBounds(static_cast<int>(navX), static_cast<int>(row1Y), 52,
                          static_cast<int>(rowH));
@@ -9731,68 +9828,17 @@ public:
                            static_cast<int>(row1Y), 56,
                            static_cast<int>(rowH));
 
-    float leftEndX = 12.0f;
-    const bool showInlineGroups = (touchW >= 740.0f);
-    if (showInlineGroups) {
-      btnNavMenu.setVisible(false);
-      const float grpW = 56.0f;
-      const float grpGap = 3.0f;
-      for (int i = 0; i < 5; ++i) {
-        if (groupButtons[i] != nullptr) {
-          groupButtons[i]->setVisible(true);
-          groupButtons[i]->setBounds(
-              static_cast<int>(12.0f + static_cast<float>(i) * (grpW + grpGap)),
-              static_cast<int>(row1Y), static_cast<int>(grpW),
-              static_cast<int>(rowH));
-        }
-      }
-      leftEndX = 12.0f + 5.0f * grpW + 4.0f * grpGap;
-    } else {
-      for (int i = 0; i < 5; ++i) {
-        if (groupButtons[i] != nullptr) {
-          groupButtons[i]->setVisible(false);
-          groupButtons[i]->setBounds(0, 0, 0, 0);
-        }
-      }
-      btnNavMenu.setVisible(true);
-      btnNavMenu.setBounds(12, static_cast<int>(row1Y), 90,
-                           static_cast<int>(rowH));
-      leftEndX = 102.0f;
-    }
-
-    const int bcX = static_cast<int>(leftEndX + 8.0f);
+    const int bcX = 14;
     const int bcRight = static_cast<int>(navX - 8.0f);
     breadcrumbBounds =
         juce::Rectangle<int>(bcX, static_cast<int>(row1Y),
                              std::max(0, bcRight - bcX), static_cast<int>(rowH));
 
-    // Row 2: Dynamic Context Sub-Tabs across touchscreen width
-    const float row2Y = topY + 28.0f;
-    int visibleSubCount = 0;
-    for (size_t i = 0; i < subTabButtons.size(); ++i) {
-      if (subTabButtons[i]->isVisible())
-        visibleSubCount++;
-    }
-    if (visibleSubCount > 0) {
-      const float subAvailW = std::max(120.0f, touchW - 14.0f);
-      const float subBtnW = subAvailW / static_cast<float>(visibleSubCount);
-      int subIdx = 0;
-      for (size_t i = 0; i < subTabButtons.size(); ++i) {
-        if (subTabButtons[i]->isVisible()) {
-          subTabButtons[i]->setBounds(
-              static_cast<int>(12.0f + subIdx * subBtnW),
-              static_cast<int>(row2Y), static_cast<int>(subBtnW - 3.0f),
-              static_cast<int>(rowH));
-          subIdx++;
-        }
-      }
-    }
-
-    // Touchscreen Swappable Views (All Embedded - Below 2-row Header)
-    const float viewY = topY + 53.0f;
+    // Touchscreen Swappable Views (All Embedded - Full Height Below Header)
+    const float viewY = topY + 30.0f;
     const bool isFullHeightView = true;
     const float quickH = 0.0f;
-    const float viewH = upperH - 57.0f;
+    const float viewH = upperH - 34.0f;
     const float viewW = touchW - 16.0f;
 
     auto viewBounds =
@@ -9808,8 +9854,10 @@ public:
     vcaPanelView.setBounds(viewBounds);
     patchMatrixView.setBounds(viewBounds);
     surroundPanView.setBounds(viewBounds);
+    gangModal.setBounds(viewBounds);
     fxHostView.setBounds(viewBounds);
     broadcastView.setBounds(viewBounds);
+    mcloudModal.setBounds(viewBounds);
     homeLauncherView.setBounds(viewBounds);
     recentView.setBounds(viewBounds);
     quickSettingsPanel.setBounds(getLocalBounds());
@@ -9888,11 +9936,6 @@ public:
     // 5. Luxury Mahogany Armrest
     armrest.setBounds(0, static_cast<int>(h - armrestH), static_cast<int>(w),
                       static_cast<int>(armrestH));
-
-    // Floating Modals (Overlay bounds)
-    auto modalBounds = getLocalBounds();
-    gangModal.setBounds(modalBounds);
-    mcloudModal.setBounds(modalBounds);
   }
 
 private:
@@ -10880,21 +10923,11 @@ private:
       selectNav(MainNavGroup::Routing, 1);
     };
 
-    // Modals opening & callbacks (Fase 4)
+    // Embedded modules routed via Touchscreen Layers (no modal overlays)
     statusBar.onOpenAiModal = [this] { openChannelAiModal(); };
     statusBar.onOpenDspRackModal = [this] { selectNav(MainNavGroup::Fx, 1); };
-    statusBar.onOpenMCloudModal = [this] {
-      mcloudModal.setVisible(true);
-      mcloudModal.toFront(true);
-    };
-    statusBar.onOpenGangModal = [this] {
-      std::array<int, 8> vis{};
-      for (int s = 0; s < 8; ++s)
-        vis[static_cast<size_t>(s)] = getEngineChannelForSlot(s);
-      gangModal.setVisibleChannels(vis);
-      gangModal.setVisible(true);
-      gangModal.toFront(true);
-    };
+    statusBar.onOpenMCloudModal = [this] { selectNav(MainNavGroup::Show, 5); };
+    statusBar.onOpenGangModal = [this] { selectNav(MainNavGroup::Routing, 4); };
 
     gangModal.onGroupsUpdated =
         [this](const std::array<ChannelLinkGroup,

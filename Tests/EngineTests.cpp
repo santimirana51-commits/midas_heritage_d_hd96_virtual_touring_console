@@ -7142,15 +7142,18 @@ public:
                "Active subpage should match");
       }
 
-      // Routing subpages: Patch Matrix, 3D Surround, VCA, Bus & Direct
-      // (Talkback lives only in Mix > Monitor & Talkback)
-      for (int sub = 0; sub <= 3; ++sub) {
+      // Routing subpages: Patch Matrix, 3D Surround, VCA, Bus & Direct,
+      // Gang Fader (Talkback lives only in Mix > Monitor & Talkback)
+      for (int sub = 0; sub <= 4; ++sub) {
         consoleSurface->selectNav(Group::Routing, sub);
         expect(consoleSurface->getActiveGroup() == Group::Routing,
                "Active group should be Routing");
         expect(consoleSurface->getActiveSubPage() == sub,
                "Active subpage should match");
       }
+      expect(consoleSurface->getActiveBreadcrumb().contains("ROUTING") &&
+                 consoleSurface->getActiveBreadcrumb().contains("GANG FADER"),
+             "Breadcrumb must show ROUTING > GANG FADER");
 
       // FX subpages: 24-Slot Rack, DSP Models
       for (int sub = 0; sub <= 1; ++sub) {
@@ -7162,14 +7165,17 @@ public:
       }
 
       // Show subpages: Cue List, 64-Ch Recorder, Offline Bounce, Scene
-      // Overview, Broadcast Stems
-      for (int sub = 0; sub <= 4; ++sub) {
+      // Overview, Broadcast Stems, mCloud Sync
+      for (int sub = 0; sub <= 5; ++sub) {
         consoleSurface->selectNav(Group::Show, sub);
         expect(consoleSurface->getActiveGroup() == Group::Show,
                "Active group should be Show");
         expect(consoleSurface->getActiveSubPage() == sub,
                "Active subpage should match");
       }
+      expect(consoleSurface->getActiveBreadcrumb().contains("SHOW") &&
+                 consoleSurface->getActiveBreadcrumb().contains("mCLOUD SYNC"),
+             "Breadcrumb must show SHOW > mCLOUD SYNC");
 
       // System subpages: ASIO Bridge, Audio Hardware, Virtual Cable, OSC
       // Server, Console Setup
@@ -7181,9 +7187,9 @@ public:
                "Active subpage should match");
       }
 
-      // 1b. Persistent Group Bar, Breadcrumb, Search & Favorites
-      expect(consoleSurface->isGroupButtonBarVisible(),
-             "Main group buttons must be visible on wide surface");
+      // 1b. Clean Single-Row Header, Breadcrumb, Search & Favorites
+      expect(!consoleSurface->isGroupButtonBarVisible(),
+             "Circled top group bar must remain hidden");
       consoleSurface->selectNav(Group::System, 2); // Virtual Cable
       expect(consoleSurface->getActiveBreadcrumb().contains("SYSTEM") &&
                  consoleSurface->getActiveBreadcrumb().contains(
@@ -7225,13 +7231,25 @@ public:
                  recMatches[0]->subPage == 1,
              "Search 'recorder' must resolve to Show > 64-Ch Recorder");
 
-      // Narrow touchscreen collapses main groups into MENU drawer
+      const auto gangMatches =
+          AndroidHomeLauncherView::findPagesMatching("gang fader");
+      expect(!gangMatches.empty() && gangMatches[0]->groupIdx == 1 &&
+                 gangMatches[0]->subPage == 4,
+             "Search 'gang fader' must resolve to Routing > Gang Fader");
+
+      const auto mcloudMatches =
+          AndroidHomeLauncherView::findPagesMatching("mcloud");
+      expect(!mcloudMatches.empty() && mcloudMatches[0]->groupIdx == 3 &&
+                 mcloudMatches[0]->subPage == 5,
+             "Search 'mcloud' must resolve to Show > mCloud Sync");
+
+      // Circled top group bar stays hidden on both narrow and wide surfaces
       consoleSurface->setSize(960, 720);
       expect(!consoleSurface->isGroupButtonBarVisible(),
-             "Narrow surface should collapse inline group bar into MENU");
+             "Circled top group bar must remain hidden on narrow surface");
       consoleSurface->setSize(1920, 1080);
-      expect(consoleSurface->isGroupButtonBarVisible(),
-             "Wide surface restores inline group bar");
+      expect(!consoleSurface->isGroupButtonBarVisible(),
+             "Circled top group bar must remain hidden on wide surface");
 
       // 2. State readout verification across all console parameters
       auto &ch = engine.channels[0];
