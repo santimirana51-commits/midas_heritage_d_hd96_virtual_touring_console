@@ -69,3 +69,10 @@ Suite pengujian mencakup:
 - **GravitonMatrix_Tests**: Pengujian queue matriks non-blocking.
 - **GravitonBenchmark**: Profiling performa algoritma DSP inti.
 
+---
+
+## 📱 Wireless Android Remote Control
+Aplikasi remote kontrol tablet & HP Android mandiri untuk mengendalikan mixer ini secara nirkabel melalui protokol OSC UDP (Port default `53000`):
+👉 **[Repositori Android Remote: santimirana51-commits/heritage_d_hd96_remote](https://github.com/santimirana51-commits/heritage_d_hd96_remote)** (Tersedia file APK siap pakai).
+
+
