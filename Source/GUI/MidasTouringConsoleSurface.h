@@ -1069,40 +1069,273 @@ private:
 };
 
 // ==============================================================================
-// ANDROID-STYLE HOME LAUNCHER, RECENT WORKSPACE & QUICK SETTINGS PULL-DOWN
+// CONSOLE HOME DIRECTORY, GLOBAL SEARCH, QUICK ACCESS, FAVORITES & RECENT
 // ==============================================================================
 class AndroidHomeLauncherView final : public juce::Component {
 public:
-  struct AppDef {
+  struct PageDef {
+    int groupIdx;
+    int subPage;
+    const char *groupName;
     const char *badge;
     const char *title;
     const char *subtitle;
+    const char *keywords;
     juce::uint32 colorHex;
   };
 
-  AndroidHomeLauncherView() { setOpaque(false); }
+  struct QuickShortcutDef {
+    int groupIdx;
+    int subPage;
+    const char *label;
+    const char *catTag;
+    juce::uint32 colorHex;
+  };
 
+  static const std::vector<PageDef> &getCatalog() {
+    static const std::vector<PageDef> kCatalog = {
+        // 0: MIX
+        {0, 0, "MIX", "OV", "Overview", "Meter & Status Konsol",
+         "overview meter status console mix home", 0xff38bdf8},
+        {0, 1, "MIX", "EQ", "Equaliser (PEQ & DYN)",
+         "4-Band PEQ, Dynamic EQ & RTA",
+         "eq equaliser peq dynamic rta filter hpf lpf frequency", 0xfff59e0b},
+        {0, 2, "MIX", "DY", "Comp & Gate", "Compressor & Noise Gate",
+         "dynamics comp compressor gate threshold ratio attack release",
+         0xffa855f7},
+        {0, 3, "MIX", "AI", "Midas AI", "Adaptive Channel AI Assist",
+         "midas ai channel auto eq assist learn smart", 0xff10b981},
+        {0, 4, "MIX", "DG", "Dugan Automixer", "16-Ch Speech Automixer",
+         "dugan automixer speech mic gain sharing conference", 0xfffacc15},
+        {0, 5, "MIX", "MN", "Monitor & Talkback",
+         "Control Room, Solo, IEM & Talkback",
+         "monitor talkback solo cue phones intercom cr iem comms", 0xff38bdf8},
+        // 1: ROUTING
+        {1, 0, "ROUTING", "PM", "Patch Matrix",
+         "Stagebox & Crosspoint Routing",
+         "patch matrix stagebox input output crosspoint routing", 0xff10b981},
+        {1, 1, "ROUTING", "3D", "3D Surround", "Immersive 5.1 / LFE Panning",
+         "3d surround panning lfe immersive spatial xyz", 0xff38bdf8},
+        {1, 2, "ROUTING", "VC", "VCA Groups",
+         "24 VCA & POPulation Groups",
+         "vca pop population groups spill fader master", 0xfff59e0b},
+        {1, 3, "ROUTING", "BS", "Bus & Direct",
+         "96 AUX / IEM Mix & Matrix Sends",
+         "bus direct aux iem monitor wedge mix send matrix", 0xff0ea5e9},
+        // 2: FX
+        {2, 0, "FX", "FX", "24-Slot Rack", "Virtual FX Rack & Reverbs",
+         "fx rack reverb delay chorus pitch plate dvr2 nebula effects",
+         0xfff59e0b},
+        {2, 1, "FX", "MD", "DSP Models", "Vintage Comp & EQ Models",
+         "dsp models vintage emt140 kt1176 tc2290 hardware", 0xff38bdf8},
+        // 3: SHOW
+        {3, 0, "SHOW", "CU", "Cue List", "Scene Automation & Recall",
+         "cue list scene snapshot recall automation show", 0xff10b981},
+        {3, 1, "SHOW", "RC", "64-Ch Recorder",
+         "Multitrack WAV & Virtual Soundcheck",
+         "recorder multitrack wav 64ch usb daw virtual soundcheck record",
+         0xff38bdf8},
+        {3, 2, "SHOW", "BN", "Offline Bounce", "High-Speed Offline Render",
+         "offline bounce export render stem wav mixdown", 0xffa855f7},
+        {3, 3, "SHOW", "SC", "Scene Overview", "Quick Scene Tiles",
+         "scene overview quick recall tiles snapshot", 0xfff59e0b},
+        {3, 4, "SHOW", "BC", "Broadcast Stems", "EBU R128 & Broadcast Bus",
+         "broadcast stems lufs ebu r128 streaming feed", 0xfff59e0b},
+        // 4: SYSTEM
+        {4, 0, "SYSTEM", "AS", "ASIO Bridge", "Low-Latency ASIO Streamer",
+         "asio bridge driver low latency daw streamer", 0xff38bdf8},
+        {4, 1, "SYSTEM", "HW", "Audio Hardware",
+         "Device, Sample Rate & Buffer",
+         "audio hardware device soundcard sample rate buffer wasapi asio",
+         0xffa855f7},
+        {4, 2, "SYSTEM", "CB", "Virtual Cable",
+         "VBAN UDP (6980) & 4x Stereo IPC",
+         "virtual cable heritage vban udp shm voicemeeter loopback windows",
+         0xff38bdf8},
+        {4, 3, "SYSTEM", "OS", "OSC Server",
+         "Android Remote & UDP 53000",
+         "osc server remote android wifi tablet udp 53000 mirror", 0xff10b981},
+        {4, 4, "SYSTEM", "ST", "Console Setup",
+         "Preferences & Signal Generator",
+         "console setup settings preferences oscillator signal generator",
+         0xff0ea5e9},
+    };
+    return kCatalog;
+  }
+
+  static std::vector<const PageDef *>
+  findPagesMatching(const juce::String &rawQuery) {
+    const auto q = rawQuery.trim().toLowerCase();
+    std::vector<std::pair<int, const PageDef *>> scored;
+    if (q.isEmpty()) {
+      for (const auto &p : getCatalog())
+        scored.push_back({0, &p});
+    } else {
+      juce::StringArray tokens;
+      tokens.addTokens(q, " ", "\"");
+      tokens.removeEmptyStrings();
+      for (const auto &p : getCatalog()) {
+        const juce::String titleL = juce::String(p.title).toLowerCase();
+        const juce::String grpL = juce::String(p.groupName).toLowerCase();
+        const juce::String subL = juce::String(p.subtitle).toLowerCase();
+        const juce::String kwL = juce::String(p.keywords).toLowerCase();
+        const juce::String all =
+            grpL + " " + titleL + " " + subL + " " + kwL;
+
+        bool allMatch = true;
+        for (const auto &tok : tokens) {
+          if (!all.contains(tok)) {
+            allMatch = false;
+            break;
+          }
+        }
+        if (!allMatch)
+          continue;
+
+        int score = 10;
+        if (titleL == q)
+          score = 100;
+        else if (titleL.startsWith(q))
+          score = 80;
+        else if (titleL.contains(q))
+          score = 60;
+        else if (grpL.contains(q))
+          score = 40;
+        else if (subL.contains(q))
+          score = 30;
+        scored.push_back({score, &p});
+      }
+      std::stable_sort(scored.begin(), scored.end(),
+                       [](const auto &a, const auto &b) {
+                         return a.first > b.first;
+                       });
+    }
+    std::vector<const PageDef *> out;
+    out.reserve(scored.size());
+    for (const auto &item : scored)
+      out.push_back(item.second);
+    return out;
+  }
+
+  AndroidHomeLauncherView() {
+    setOpaque(false);
+
+    searchBox.setTextToShowWhenEmpty(
+        "Cari fitur (mis: virtual cable, IEM, EQ, recorder, osc)...",
+        juce::Colour(0xff64748b));
+    searchBox.setColour(juce::TextEditor::backgroundColourId,
+                        juce::Colour(0xff111927));
+    searchBox.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+    searchBox.setColour(juce::TextEditor::outlineColourId,
+                        juce::Colour(0xff2b3c56));
+    searchBox.setColour(juce::TextEditor::focusedOutlineColourId,
+                        juce::Colour(0xff38bdf8));
+    searchBox.setFont(midas_ui::getFont(11.0f, false));
+    searchBox.onTextChange = [this] {
+      hoveredKind = -1;
+      hoveredIndex = -1;
+      clearSearchBtn.setVisible(searchBox.getText().isNotEmpty());
+      repaint();
+    };
+    searchBox.onReturnKey = [this] {
+      const auto matches = findPagesMatching(searchBox.getText());
+      if (!matches.empty() && onPageSelected) {
+        onPageSelected(matches[0]->groupIdx, matches[0]->subPage);
+      }
+    };
+    addAndMakeVisible(searchBox);
+
+    clearSearchBtn.setButtonText("X");
+    clearSearchBtn.setColour(juce::TextButton::buttonColourId,
+                             juce::Colour(0xff1e293b));
+    clearSearchBtn.setColour(juce::TextButton::textColourOffId,
+                             juce::Colours::white);
+    clearSearchBtn.onClick = [this] { clearSearch(); };
+    addChildComponent(clearSearchBtn);
+  }
+
+  std::function<void(int groupIdx, int subPage)> onPageSelected;
   std::function<void(int appIdx)> onAppSelected;
 
+  void setActivePage(int groupIdx, int subPage) {
+    activeGroupIdx = groupIdx;
+    activeSubPageIdx = subPage;
+    repaint();
+  }
+
+  void setFavorites(const std::vector<std::pair<int, int>> &favs) {
+    favoriteKeys = favs;
+    repaint();
+  }
+
+  void clearSearch() {
+    searchBox.setText("", juce::dontSendNotification);
+    clearSearchBtn.setVisible(false);
+    hoveredKind = -1;
+    hoveredIndex = -1;
+    repaint();
+  }
+
+  void focusSearch() {
+    if (isShowing())
+      searchBox.grabKeyboardFocus();
+  }
+
+  void resized() override {
+    auto inner = getLocalBounds().reduced(12, 8);
+    auto hdr = inner.removeFromTop(26);
+    hdr.removeFromLeft(195); // Room for HOME DIRECTORY title
+    if (clearSearchBtn.isVisible())
+      clearSearchBtn.setBounds(hdr.removeFromRight(26).reduced(1));
+    else
+      clearSearchBtn.setBounds(hdr.getRight() - 26, hdr.getY(), 24, 24);
+    searchBox.setBounds(hdr.reduced(2, 1));
+  }
+
   void mouseMove(const juce::MouseEvent &e) override {
-    const int next = hitTestApp(e.position);
-    if (next != hoveredIdx) {
-      hoveredIdx = next;
+    const auto hit = hitTest(e.position);
+    if (hit.first != hoveredKind || hit.second != hoveredIndex) {
+      hoveredKind = hit.first;
+      hoveredIndex = hit.second;
       repaint();
     }
   }
 
   void mouseExit(const juce::MouseEvent &) override {
-    if (hoveredIdx != -1) {
-      hoveredIdx = -1;
+    if (hoveredKind != -1 || hoveredIndex != -1) {
+      hoveredKind = -1;
+      hoveredIndex = -1;
       repaint();
     }
   }
 
   void mouseUp(const juce::MouseEvent &e) override {
-    const int idx = hitTestApp(e.position);
-    if (idx >= 0 && idx < 8 && onAppSelected)
-      onAppSelected(idx);
+    const auto hit = hitTest(e.position);
+    if (hit.first == 1) { // Search result
+      const auto matches = findPagesMatching(searchBox.getText());
+      if (hit.second >= 0 && hit.second < static_cast<int>(matches.size()) &&
+          onPageSelected) {
+        onPageSelected(matches[static_cast<size_t>(hit.second)]->groupIdx,
+                       matches[static_cast<size_t>(hit.second)]->subPage);
+      }
+    } else if (hit.first == 2) { // Quick shortcut
+      const auto shortcuts = getQuickShortcuts();
+      if (hit.second >= 0 &&
+          hit.second < static_cast<int>(shortcuts.size()) && onPageSelected) {
+        onPageSelected(shortcuts[static_cast<size_t>(hit.second)].groupIdx,
+                       shortcuts[static_cast<size_t>(hit.second)].subPage);
+      }
+    } else if (hit.first == 3) { // Directory item
+      const auto &cat = getCatalog();
+      if (hit.second >= 0 && hit.second < static_cast<int>(cat.size()) &&
+          onPageSelected) {
+        onPageSelected(cat[static_cast<size_t>(hit.second)].groupIdx,
+                       cat[static_cast<size_t>(hit.second)].subPage);
+      }
+    } else if (hit.first == 4) { // Category header (subPage 0)
+      if (hit.second >= 0 && hit.second < 5 && onPageSelected)
+        onPageSelected(hit.second, 0);
+    }
   }
 
   void paint(juce::Graphics &g) override {
@@ -1112,100 +1345,351 @@ public:
     g.setColour(juce::Colour(0xff233146));
     g.drawRoundedRectangle(area, 12.0f, 1.0f);
 
-    auto inner = area.reduced(14.0f, 10.0f);
-    auto hdr = inner.removeFromTop(24.0f);
-    g.setFont(midas_ui::getFont(12.5f, true));
-    g.setColour(juce::Colours::white);
-    g.drawText("CONSOLE HOME LAUNCHER", hdr.toNearestInt(),
+    auto inner = area.reduced(12.0f, 8.0f);
+    auto hdr = inner.removeFromTop(26.0f);
+    g.setFont(midas_ui::getFont(12.0f, true));
+    g.setColour(juce::Colour(0xff38bdf8));
+    g.drawText("CONSOLE DIRECTORY", hdr.removeFromLeft(190.0f).toNearestInt(),
                juce::Justification::centredLeft);
 
-    g.setFont(midas_ui::getFont(9.5f, false));
+    inner.removeFromTop(6.0f);
+
+    const auto q = searchBox.getText().trim();
+    if (q.isNotEmpty()) {
+      paintSearchResults(g, inner, q);
+      return;
+    }
+
+    // 1. Quick Access / Pinned Essential Shortcuts Strip
+    auto quickHdr = inner.removeFromTop(14.0f);
+    g.setFont(midas_ui::getFont(8.5f, true));
     g.setColour(midas_colors::kTextMuted);
-    g.drawText("Tap modul untuk membuka  |  Fader & Meter tetap aktif di bawah",
-               hdr.toNearestInt(), juce::Justification::centredRight);
+    g.drawText("QUICK ACCESS  |  VIRTUAL CABLE, AUDIO HARDWARE, PATCH & REMOTE",
+               quickHdr.toNearestInt(), juce::Justification::centredLeft);
+    inner.removeFromTop(3.0f);
+
+    const auto shortcuts = getQuickShortcuts();
+    auto quickRow = inner.removeFromTop(34.0f);
+    const float qGap = 6.0f;
+    const float qW =
+        (quickRow.getWidth() - qGap * static_cast<float>(shortcuts.size() - 1)) /
+        static_cast<float>(shortcuts.size());
+    for (size_t i = 0; i < shortcuts.size(); ++i) {
+      auto pill = juce::Rectangle<float>(
+          quickRow.getX() + static_cast<float>(i) * (qW + qGap),
+          quickRow.getY(), qW, quickRow.getHeight());
+      const juce::Colour accent(shortcuts[i].colorHex);
+      const bool hov = (hoveredKind == 2 && hoveredIndex == static_cast<int>(i));
+      const bool isAct = (shortcuts[i].groupIdx == activeGroupIdx &&
+                          shortcuts[i].subPage == activeSubPageIdx);
+      g.setColour(hov ? juce::Colour(0xff1b2b42)
+                      : (isAct ? accent.withAlpha(0.18f)
+                               : juce::Colour(0xff121b2b)));
+      g.fillRoundedRectangle(pill, 7.0f);
+      g.setColour(isAct ? accent : accent.withAlpha(hov ? 0.9f : 0.42f));
+      g.drawRoundedRectangle(pill, 7.0f, (hov || isAct) ? 1.4f : 1.0f);
+
+      auto pIn = pill.reduced(7.0f, 3.0f);
+      g.setFont(midas_ui::getFont(7.5f, true));
+      g.setColour(accent);
+      g.drawText(shortcuts[i].catTag, pIn.removeFromTop(10.0f).toNearestInt(),
+                 juce::Justification::centredLeft, true);
+      g.setFont(midas_ui::getFont(10.0f, true));
+      g.setColour(juce::Colours::white);
+      g.drawText(shortcuts[i].label, pIn.toNearestInt(),
+                 juce::Justification::centredLeft, true);
+    }
 
     inner.removeFromTop(8.0f);
-    const float gap = 10.0f;
-    const float cardW = (inner.getWidth() - gap * 3.0f) / 4.0f;
-    const float cardH = (inner.getHeight() - gap) * 0.5f;
 
-    const auto &apps = getApps();
-    for (int i = 0; i < 8; ++i) {
-      const int col = i % 4;
-      const int row = i / 4;
-      auto card = juce::Rectangle<float>(
-          inner.getX() + static_cast<float>(col) * (cardW + gap),
-          inner.getY() + static_cast<float>(row) * (cardH + gap), cardW, cardH);
-      const juce::Colour accent(apps[static_cast<size_t>(i)].colorHex);
-      const bool hov = (hoveredIdx == i);
+    // 2. Complete 5-Category Directory
+    static const char *catNames[5] = {"1. MIX", "2. ROUTING", "3. FX",
+                                      "4. SHOW", "5. SYSTEM"};
+    static const juce::uint32 catCols[5] = {0xff38bdf8, 0xff10b981, 0xfff59e0b,
+                                            0xffa855f7, 0xff0ea5e9};
+    const float colGap = 7.0f;
+    const float colW = (inner.getWidth() - colGap * 4.0f) / 5.0f;
+    const auto &cat = getCatalog();
 
-      g.setColour(hov ? juce::Colour(0xff1a273b) : juce::Colour(0xff121b2a));
-      g.fillRoundedRectangle(card, 14.0f);
-      g.setColour(hov ? accent.withAlpha(0.85f) : accent.withAlpha(0.32f));
-      g.drawRoundedRectangle(card, 14.0f, hov ? 1.5f : 1.0f);
+    for (int grp = 0; grp < 5; ++grp) {
+      auto colRect = juce::Rectangle<float>(
+          inner.getX() + static_cast<float>(grp) * (colW + colGap),
+          inner.getY(), colW, inner.getHeight());
+      const juce::Colour accent(catCols[grp]);
 
-      auto cIn = card.reduced(12.0f, 10.0f);
-      const float iconSz = juce::jlimit(28.0f, 44.0f, cIn.getHeight() * 0.48f);
-      auto iconBox =
-          cIn.removeFromLeft(iconSz).withSizeKeepingCentre(iconSz, iconSz);
-      g.setColour(accent.withAlpha(0.20f));
-      g.fillRoundedRectangle(iconBox, 11.0f);
-      g.setColour(accent.withAlpha(0.80f));
-      g.drawRoundedRectangle(iconBox, 11.0f, 1.2f);
-      g.setFont(midas_ui::getFont(iconSz * 0.34f, true));
+      g.setColour(juce::Colour(0xff0f1726));
+      g.fillRoundedRectangle(colRect, 8.0f);
+      g.setColour(accent.withAlpha(0.28f));
+      g.drawRoundedRectangle(colRect, 8.0f, 1.0f);
+
+      auto colIn = colRect.reduced(6.0f, 5.0f);
+      auto colHdr = colIn.removeFromTop(20.0f);
+      const bool hdrHov = (hoveredKind == 4 && hoveredIndex == grp);
+      if (hdrHov) {
+        g.setColour(accent.withAlpha(0.18f));
+        g.fillRoundedRectangle(colHdr, 4.0f);
+      }
+      g.setFont(midas_ui::getFont(10.0f, true));
       g.setColour(accent);
-      g.drawText(apps[static_cast<size_t>(i)].badge, iconBox.toNearestInt(),
-                 juce::Justification::centred);
+      g.drawText(catNames[grp], colHdr.reduced(3.0f, 0.0f).toNearestInt(),
+                 juce::Justification::centredLeft);
 
-      cIn.removeFromLeft(10.0f);
-      auto textArea = cIn.withSizeKeepingCentre(
-          cIn.getWidth(), std::min(cIn.getHeight(), 34.0f));
-      g.setFont(midas_ui::getFont(12.0f, true));
-      g.setColour(juce::Colours::white);
-      g.drawText(apps[static_cast<size_t>(i)].title,
-                 textArea.removeFromTop(18.0f).toNearestInt(),
-                 juce::Justification::centredLeft, true);
-      g.setFont(midas_ui::getFont(9.5f, false));
-      g.setColour(juce::Colour(0xff94a3b8));
-      g.drawText(apps[static_cast<size_t>(i)].subtitle, textArea.toNearestInt(),
-                 juce::Justification::centredLeft, true);
+      colIn.removeFromTop(3.0f);
+      std::vector<int> indices;
+      for (size_t idx = 0; idx < cat.size(); ++idx) {
+        if (cat[idx].groupIdx == grp)
+          indices.push_back(static_cast<int>(idx));
+      }
+      const int itemCount = static_cast<int>(indices.size());
+      const float itemGap = 3.0f;
+      const float maxRowH =
+          (colIn.getHeight() -
+           itemGap * static_cast<float>(std::max(0, itemCount - 1))) /
+          static_cast<float>(std::max(1, itemCount));
+      const float rowH = juce::jlimit(18.0f, 34.0f, maxRowH);
+
+      for (int r = 0; r < itemCount; ++r) {
+        const int catIdx = indices[static_cast<size_t>(r)];
+        const auto &item = cat[static_cast<size_t>(catIdx)];
+        auto rowRect = colIn.removeFromTop(rowH);
+        const bool isHov = (hoveredKind == 3 && hoveredIndex == catIdx);
+        const bool isAct = (item.groupIdx == activeGroupIdx &&
+                            item.subPage == activeSubPageIdx);
+        const bool isFav = isFavorite(item.groupIdx, item.subPage);
+        const juce::Colour itemAcc(item.colorHex);
+
+        g.setColour(isHov ? juce::Colour(0xff1e2d45)
+                          : (isAct ? itemAcc.withAlpha(0.20f)
+                                   : juce::Colour(0xff141e2f)));
+        g.fillRoundedRectangle(rowRect, 5.0f);
+        g.setColour(isAct ? itemAcc
+                          : (isHov ? itemAcc.withAlpha(0.75f)
+                                   : juce::Colour(0xff223047)));
+        g.drawRoundedRectangle(rowRect, 5.0f, isAct ? 1.3f : 0.8f);
+
+        auto rIn = rowRect.reduced(5.0f, 2.0f);
+        if (isFav) {
+          g.setFont(midas_ui::getFont(9.5f, true));
+          g.setColour(midas_colors::kAccentGold);
+          g.drawText("*", rIn.removeFromRight(12.0f).toNearestInt(),
+                     juce::Justification::centred);
+        }
+        g.setFont(midas_ui::getFont(9.5f, isAct || isHov));
+        g.setColour(isAct ? juce::Colours::white : juce::Colour(0xffe2e8f0));
+        g.drawText(item.title, rIn.toNearestInt(),
+                   juce::Justification::centredLeft, true);
+
+        if (r + 1 < itemCount)
+          colIn.removeFromTop(itemGap);
+      }
     }
   }
 
 private:
-  static const std::array<AppDef, 8> &getApps() {
-    static const std::array<AppDef, 8> kApps = {{
-        {"OV", "Overview", "Meter & Status Konsol", 0xff38bdf8},
-        {"CH", "Channel", "Channel AI & Strip Setup", 0xff10b981},
-        {"RT", "Routing", "Patch Matrix & Bus", 0xff34d399},
-        {"EQ", "EQ", "4-Band PEQ & RTA", 0xff0ea5e9},
-        {"DY", "Dynamics", "Gate & Compressor", 0xfffacc15},
-        {"FX", "FX Rack", "24-Slot Effects Bay", 0xfff59e0b},
-        {"REC", "Recorder", "64-Ch WAV Recorder", 0xffef4444},
-        {"SET", "Settings", "Console & Audio Setup", 0xffa855f7},
-    }};
-    return kApps;
-  }
-
-  int hitTestApp(juce::Point<float> p) const {
-    auto inner = getLocalBounds().toFloat().reduced(14.0f, 10.0f);
-    inner.removeFromTop(32.0f);
-    const float gap = 10.0f;
-    const float cardW = (inner.getWidth() - gap * 3.0f) / 4.0f;
-    const float cardH = (inner.getHeight() - gap) * 0.5f;
-    for (int i = 0; i < 8; ++i) {
-      const int col = i % 4;
-      const int row = i / 4;
-      auto card = juce::Rectangle<float>(
-          inner.getX() + static_cast<float>(col) * (cardW + gap),
-          inner.getY() + static_cast<float>(row) * (cardH + gap), cardW, cardH);
-      if (card.contains(p))
-        return i;
+  std::vector<QuickShortcutDef> getQuickShortcuts() const {
+    std::vector<QuickShortcutDef> list = {
+        {4, 2, "Virtual Cable", "SYSTEM > VBAN", 0xff38bdf8},
+        {4, 1, "Audio Hardware", "SYSTEM > I/O", 0xffa855f7},
+        {1, 0, "Patch Matrix", "ROUTING > PATCH", 0xff10b981},
+        {4, 3, "OSC Remote", "SYSTEM > 53000", 0xff10b981},
+        {3, 1, "64-Ch Recorder", "SHOW > WAV REC", 0xff38bdf8},
+        {0, 1, "Equaliser PEQ", "MIX > EQ/RTA", 0xfff59e0b},
+    };
+    // If user starred a custom favorite not already in the top 5, surface it
+    // in slot 6 so user favorites appear cleanly in Quick Access.
+    for (const auto &fk : favoriteKeys) {
+      bool alreadyListed = false;
+      for (size_t i = 0; i + 1 < list.size(); ++i) {
+        if (list[i].groupIdx == fk.first && list[i].subPage == fk.second) {
+          alreadyListed = true;
+          break;
+        }
+      }
+      if (!alreadyListed) {
+        for (const auto &p : getCatalog()) {
+          if (p.groupIdx == fk.first && p.subPage == fk.second) {
+            list.back() = {p.groupIdx, p.subPage, p.title, p.groupName,
+                           0xfffacc15};
+            return list;
+          }
+        }
+      }
     }
-    return -1;
+    return list;
   }
 
-  int hoveredIdx = -1;
+  bool isFavorite(int grp, int sub) const {
+    for (const auto &f : favoriteKeys) {
+      if (f.first == grp && f.second == sub)
+        return true;
+    }
+    return false;
+  }
+
+  void paintSearchResults(juce::Graphics &g, juce::Rectangle<float> area,
+                          const juce::String &query) {
+    const auto matches = findPagesMatching(query);
+    auto hdr = area.removeFromTop(18.0f);
+    g.setFont(midas_ui::getFont(9.5f, true));
+    g.setColour(midas_colors::kTextMuted);
+    g.drawText("HASIL PENCARIAN \"" + query.toUpperCase() + "\" (" +
+                   juce::String(matches.size()) +
+                   " modul ditemukan  |  Tekan ENTER untuk buka teratas)",
+               hdr.toNearestInt(), juce::Justification::centredLeft);
+    area.removeFromTop(6.0f);
+
+    if (matches.empty()) {
+      g.setFont(midas_ui::getFont(12.0f, false));
+      g.setColour(midas_colors::kTextMuted);
+      g.drawText(
+          "Tidak ada modul yang cocok. Coba: virtual cable, IEM, EQ, recorder, osc",
+          area.toNearestInt(), juce::Justification::centred);
+      return;
+    }
+
+    const int count = std::min(8, static_cast<int>(matches.size()));
+    const float gap = 8.0f;
+    const float cardW = (area.getWidth() - gap) * 0.5f;
+    const float cardH = std::min(62.0f, (area.getHeight() - gap * 3.0f) * 0.25f);
+
+    for (int i = 0; i < count; ++i) {
+      const auto *p = matches[static_cast<size_t>(i)];
+      const int col = i % 2;
+      const int row = i / 2;
+      auto card = juce::Rectangle<float>(
+          area.getX() + static_cast<float>(col) * (cardW + gap),
+          area.getY() + static_cast<float>(row) * (cardH + gap), cardW, cardH);
+      const juce::Colour accent(p->colorHex);
+      const bool hov = (hoveredKind == 1 && hoveredIndex == i);
+
+      g.setColour(hov ? juce::Colour(0xff1c2b42) : juce::Colour(0xff121b2b));
+      g.fillRoundedRectangle(card, 9.0f);
+      g.setColour(hov ? accent : accent.withAlpha(0.45f));
+      g.drawRoundedRectangle(card, 9.0f, hov ? 1.5f : 1.0f);
+
+      auto cIn = card.reduced(10.0f, 6.0f);
+      auto badge = cIn.removeFromLeft(34.0f).withSizeKeepingCentre(30.0f, 30.0f);
+      g.setColour(accent.withAlpha(0.18f));
+      g.fillRoundedRectangle(badge, 7.0f);
+      g.setColour(accent);
+      g.drawRoundedRectangle(badge, 7.0f, 1.0f);
+      g.setFont(midas_ui::getFont(10.0f, true));
+      g.drawText(p->badge, badge.toNearestInt(), juce::Justification::centred);
+
+      cIn.removeFromLeft(8.0f);
+      auto openPill = cIn.removeFromRight(56.0f).withSizeKeepingCentre(52.0f, 20.0f);
+      g.setColour(accent.withAlpha(0.22f));
+      g.fillRoundedRectangle(openPill, 5.0f);
+      g.setFont(midas_ui::getFont(8.5f, true));
+      g.setColour(accent);
+      g.drawText("OPEN >", openPill.toNearestInt(), juce::Justification::centred);
+
+      g.setFont(midas_ui::getFont(8.5f, true));
+      g.setColour(accent);
+      g.drawText(juce::String(p->groupName) + "  >  " +
+                     juce::String(p->title).toUpperCase(),
+                 cIn.removeFromTop(14.0f).toNearestInt(),
+                 juce::Justification::centredLeft, true);
+      g.setFont(midas_ui::getFont(10.0f, false));
+      g.setColour(juce::Colour(0xffcbd5e1));
+      g.drawText(p->subtitle, cIn.toNearestInt(),
+                 juce::Justification::centredLeft, true);
+    }
+  }
+
+  // Returns {kind, index}:
+  //   kind 1 = search match index
+  //   kind 2 = quick shortcut index
+  //   kind 3 = catalog index
+  //   kind 4 = category header (groupIdx 0..4)
+  std::pair<int, int> hitTest(juce::Point<float> p) const {
+    auto inner = getLocalBounds().toFloat().reduced(12.0f, 8.0f);
+    inner.removeFromTop(32.0f);
+
+    const auto q = searchBox.getText().trim();
+    if (q.isNotEmpty()) {
+      inner.removeFromTop(24.0f);
+      const auto matches = findPagesMatching(q);
+      const int count = std::min(8, static_cast<int>(matches.size()));
+      const float gap = 8.0f;
+      const float cardW = (inner.getWidth() - gap) * 0.5f;
+      const float cardH =
+          std::min(62.0f, (inner.getHeight() - gap * 3.0f) * 0.25f);
+      for (int i = 0; i < count; ++i) {
+        const int col = i % 2;
+        const int row = i / 2;
+        auto card = juce::Rectangle<float>(
+            inner.getX() + static_cast<float>(col) * (cardW + gap),
+            inner.getY() + static_cast<float>(row) * (cardH + gap), cardW,
+            cardH);
+        if (card.contains(p))
+          return {1, i};
+      }
+      return {-1, -1};
+    }
+
+    inner.removeFromTop(17.0f);
+    const auto shortcuts = getQuickShortcuts();
+    auto quickRow = inner.removeFromTop(34.0f);
+    const float qGap = 6.0f;
+    const float qW =
+        (quickRow.getWidth() - qGap * static_cast<float>(shortcuts.size() - 1)) /
+        static_cast<float>(shortcuts.size());
+    for (size_t i = 0; i < shortcuts.size(); ++i) {
+      auto pill = juce::Rectangle<float>(
+          quickRow.getX() + static_cast<float>(i) * (qW + qGap),
+          quickRow.getY(), qW, quickRow.getHeight());
+      if (pill.contains(p))
+        return {2, static_cast<int>(i)};
+    }
+
+    inner.removeFromTop(8.0f);
+    const float colGap = 7.0f;
+    const float colW = (inner.getWidth() - colGap * 4.0f) / 5.0f;
+    const auto &cat = getCatalog();
+
+    for (int grp = 0; grp < 5; ++grp) {
+      auto colRect = juce::Rectangle<float>(
+          inner.getX() + static_cast<float>(grp) * (colW + colGap),
+          inner.getY(), colW, inner.getHeight());
+      auto colIn = colRect.reduced(6.0f, 5.0f);
+      auto colHdr = colIn.removeFromTop(20.0f);
+      if (colHdr.contains(p))
+        return {4, grp};
+
+      colIn.removeFromTop(3.0f);
+      std::vector<int> indices;
+      for (size_t idx = 0; idx < cat.size(); ++idx) {
+        if (cat[idx].groupIdx == grp)
+          indices.push_back(static_cast<int>(idx));
+      }
+      const int itemCount = static_cast<int>(indices.size());
+      const float itemGap = 3.0f;
+      const float maxRowH =
+          (colIn.getHeight() -
+           itemGap * static_cast<float>(std::max(0, itemCount - 1))) /
+          static_cast<float>(std::max(1, itemCount));
+      const float rowH = juce::jlimit(18.0f, 34.0f, maxRowH);
+
+      for (int r = 0; r < itemCount; ++r) {
+        const int catIdx = indices[static_cast<size_t>(r)];
+        auto rowRect = colIn.removeFromTop(rowH);
+        if (rowRect.contains(p))
+          return {3, catIdx};
+        if (r + 1 < itemCount)
+          colIn.removeFromTop(itemGap);
+      }
+    }
+    return {-1, -1};
+  }
+
+  juce::TextEditor searchBox;
+  juce::TextButton clearSearchBtn;
+  std::vector<std::pair<int, int>> favoriteKeys;
+  int activeGroupIdx = 0;
+  int activeSubPageIdx = 0;
+  int hoveredKind = -1;
+  int hoveredIndex = -1;
 };
 
 class AndroidRecentWorkspaceView final : public juce::Component {
@@ -1228,18 +1712,38 @@ public:
     repaint();
   }
 
+  void setFavorites(const std::vector<Entry> &favs) {
+    favorites = favs;
+    repaint();
+  }
+
   void mouseMove(const juce::MouseEvent &e) override {
-    const int next = hitTestEntry(e.position);
-    if (next != hoveredIdx) {
-      hoveredIdx = next;
+    const auto hit = hitTestEntry(e.position);
+    if (hit.first != hoveredSection || hit.second != hoveredIdx) {
+      hoveredSection = hit.first;
+      hoveredIdx = hit.second;
+      repaint();
+    }
+  }
+
+  void mouseExit(const juce::MouseEvent &) override {
+    if (hoveredSection != -1 || hoveredIdx != -1) {
+      hoveredSection = -1;
+      hoveredIdx = -1;
       repaint();
     }
   }
 
   void mouseUp(const juce::MouseEvent &e) override {
-    const int idx = hitTestEntry(e.position);
-    if (idx >= 0 && idx < static_cast<int>(entries.size())) {
-      const auto item = entries[static_cast<size_t>(idx)];
+    const auto hit = hitTestEntry(e.position);
+    if (hit.first == 0 && hit.second >= 0 &&
+        hit.second < static_cast<int>(favorites.size())) {
+      const auto item = favorites[static_cast<size_t>(hit.second)];
+      if (onEntrySelected)
+        onEntrySelected(item.groupIdx, item.subPage);
+    } else if (hit.first == 1 && hit.second >= 0 &&
+               hit.second < static_cast<int>(entries.size())) {
+      const auto item = entries[static_cast<size_t>(hit.second)];
       if (onEntrySelected)
         onEntrySelected(item.groupIdx, item.subPage);
     } else if (onDismiss) {
@@ -1255,75 +1759,120 @@ public:
     g.drawRoundedRectangle(area, 12.0f, 1.0f);
 
     auto inner = area.reduced(14.0f, 10.0f);
-    auto hdr = inner.removeFromTop(24.0f);
+    auto hdr = inner.removeFromTop(22.0f);
     g.setFont(midas_ui::getFont(12.0f, true));
     g.setColour(juce::Colours::white);
-    g.drawText("RECENT WORKSPACE MODULES", hdr.toNearestInt(),
+    g.drawText("FAVORITES & RECENT WORKSPACE", hdr.toNearestInt(),
                juce::Justification::centredLeft);
     g.setFont(midas_ui::getFont(9.5f, false));
     g.setColour(midas_colors::kTextMuted);
-    g.drawText("Tap kartu untuk kembali ke modul terakhir", hdr.toNearestInt(),
-               juce::Justification::centredRight);
+    g.drawText("Gunakan tombol * FAV di bilah atas untuk menyematkan fitur",
+               hdr.toNearestInt(), juce::Justification::centredRight);
 
-    inner.removeFromTop(10.0f);
-    if (entries.empty()) {
-      g.setFont(midas_ui::getFont(11.0f, false));
+    inner.removeFromTop(6.0f);
+
+    // Top section: Favorites
+    auto favHdr = inner.removeFromTop(14.0f);
+    g.setFont(midas_ui::getFont(8.5f, true));
+    g.setColour(midas_colors::kAccentGold);
+    g.drawText("* PINNED FAVORITES", favHdr.toNearestInt(),
+               juce::Justification::centredLeft);
+    inner.removeFromTop(3.0f);
+    auto favRow = inner.removeFromTop(inner.getHeight() * 0.44f);
+    paintRow(g, favRow, favorites, 0,
+             "Belum ada favorit. Tap * FAV pada modul mana pun.");
+
+    inner.removeFromTop(8.0f);
+
+    // Bottom section: Recent
+    auto recHdr = inner.removeFromTop(14.0f);
+    g.setFont(midas_ui::getFont(8.5f, true));
+    g.setColour(midas_colors::kAccentCyan);
+    g.drawText("RECENTLY VISITED", recHdr.toNearestInt(),
+               juce::Justification::centredLeft);
+    inner.removeFromTop(3.0f);
+    paintRow(g, inner, entries, 1, "Belum ada riwayat modul.");
+  }
+
+private:
+  void paintRow(juce::Graphics &g, juce::Rectangle<float> rowArea,
+                const std::vector<Entry> &list, int sectionId,
+                const char *emptyText) {
+    if (list.empty()) {
+      g.setFont(midas_ui::getFont(10.5f, false));
       g.setColour(midas_colors::kTextMuted);
-      g.drawText("Belum ada riwayat modul.", inner.toNearestInt(),
+      g.drawText(emptyText, rowArea.toNearestInt(),
                  juce::Justification::centred);
       return;
     }
 
-    const int count = std::min(6, static_cast<int>(entries.size()));
-    const float gap = 10.0f;
+    const int count = std::min(6, static_cast<int>(list.size()));
+    const float gap = 8.0f;
     const float cardW =
-        (inner.getWidth() - gap * static_cast<float>(std::max(1, count) - 1)) /
+        (rowArea.getWidth() - gap * static_cast<float>(std::max(1, count) - 1)) /
         static_cast<float>(count);
     for (int i = 0; i < count; ++i) {
-      const auto &e = entries[static_cast<size_t>(i)];
+      const auto &e = list[static_cast<size_t>(i)];
       auto card = juce::Rectangle<float>(
-          inner.getX() + static_cast<float>(i) * (cardW + gap), inner.getY(),
-          cardW, inner.getHeight());
-      const bool hov = (hoveredIdx == i);
+          rowArea.getX() + static_cast<float>(i) * (cardW + gap),
+          rowArea.getY(), cardW, rowArea.getHeight());
+      const bool hov = (hoveredSection == sectionId && hoveredIdx == i);
       g.setColour(hov ? juce::Colour(0xff1a283d) : juce::Colour(0xff121c2c));
-      g.fillRoundedRectangle(card, 12.0f);
+      g.fillRoundedRectangle(card, 10.0f);
       g.setColour(hov ? e.accent : e.accent.withAlpha(0.45f));
-      g.drawRoundedRectangle(card, 12.0f, hov ? 1.5f : 1.0f);
+      g.drawRoundedRectangle(card, 10.0f, hov ? 1.5f : 1.0f);
 
-      auto cIn = card.reduced(10.0f, 10.0f);
-      g.setFont(midas_ui::getFont(9.0f, true));
+      auto cIn = card.reduced(8.0f, 6.0f);
+      g.setFont(midas_ui::getFont(8.5f, true));
       g.setColour(e.accent);
-      g.drawText(e.groupLabel, cIn.removeFromTop(16.0f).toNearestInt(),
+      g.drawText((sectionId == 0 ? "* " : "") + e.groupLabel,
+                 cIn.removeFromTop(14.0f).toNearestInt(),
                  juce::Justification::centredLeft, true);
-      g.setFont(midas_ui::getFont(12.5f, true));
+      g.setFont(midas_ui::getFont(11.5f, true));
       g.setColour(juce::Colours::white);
       g.drawText(e.title, cIn.toNearestInt(), juce::Justification::centred,
                  true);
     }
   }
 
-private:
-  int hitTestEntry(juce::Point<float> p) const {
-    if (entries.empty())
-      return -1;
+  std::pair<int, int> hitTestEntry(juce::Point<float> p) const {
     auto inner = getLocalBounds().toFloat().reduced(14.0f, 10.0f);
-    inner.removeFromTop(34.0f);
-    const int count = std::min(6, static_cast<int>(entries.size()));
-    const float gap = 10.0f;
+    inner.removeFromTop(28.0f);
+    inner.removeFromTop(17.0f);
+    auto favRow = inner.removeFromTop(inner.getHeight() * 0.44f);
+    const int favHit = hitTestRow(favRow, favorites, p);
+    if (favHit >= 0)
+      return {0, favHit};
+
+    inner.removeFromTop(25.0f);
+    const int recHit = hitTestRow(inner, entries, p);
+    if (recHit >= 0)
+      return {1, recHit};
+    return {-1, -1};
+  }
+
+  static int hitTestRow(juce::Rectangle<float> rowArea,
+                        const std::vector<Entry> &list, juce::Point<float> p) {
+    if (list.empty() || !rowArea.contains(p))
+      return -1;
+    const int count = std::min(6, static_cast<int>(list.size()));
+    const float gap = 8.0f;
     const float cardW =
-        (inner.getWidth() - gap * static_cast<float>(std::max(1, count) - 1)) /
+        (rowArea.getWidth() - gap * static_cast<float>(std::max(1, count) - 1)) /
         static_cast<float>(count);
     for (int i = 0; i < count; ++i) {
       auto card = juce::Rectangle<float>(
-          inner.getX() + static_cast<float>(i) * (cardW + gap), inner.getY(),
-          cardW, inner.getHeight());
+          rowArea.getX() + static_cast<float>(i) * (cardW + gap),
+          rowArea.getY(), cardW, rowArea.getHeight());
       if (card.contains(p))
         return i;
     }
     return -1;
   }
 
+  std::vector<Entry> favorites;
   std::vector<Entry> entries;
+  int hoveredSection = -1;
   int hoveredIdx = -1;
 };
 
@@ -8237,10 +8786,13 @@ public:
             }),
         asioBridgeView(eng), oscServerView(eng), virtualCableView(eng),
         fxHostView(eng),
-        eqPanelView(eng), dynamicEqView(eng), dynamicsPanelView(eng),
+        dynamicEqView(eng), dynamicsPanelView(eng),
         vcaPanelView(eng), duganView(eng), fullCueListView(eng),
+        btnNavMenu("MIX v", MidasTactileButton::GlowMode::Cyan),
         btnNavBack("< BACK", MidasTactileButton::GlowMode::Cyan),
         btnNavHome("HOME", MidasTactileButton::GlowMode::Gold),
+        btnNavSearch("FIND", MidasTactileButton::GlowMode::Cyan),
+        btnNavFav("* FAV", MidasTactileButton::GlowMode::Gold),
         btnNavRecent("RECENT", MidasTactileButton::GlowMode::Purple) {
 
     // Top status bar
@@ -8248,10 +8800,6 @@ public:
 
     // Dynamic Swappable Sub-Views (All Embedded directly in Touchscreen)
     addAndMakeVisible(overviewView);
-    addChildComponent(eqView);
-    addChildComponent(compView);
-    addChildComponent(gateView);
-    addChildComponent(eqPanelView);
     addChildComponent(dynamicEqView);
     addChildComponent(dynamicsPanelView);
     addChildComponent(duganView);
@@ -8262,7 +8810,6 @@ public:
     addChildComponent(surroundPanView);
     addChildComponent(vcaPanelView);
     addChildComponent(routingView);
-    addChildComponent(vcaView);
 
     addChildComponent(fxHostView);
     fxHostView.onSubPageChanged = [this](int /*pageIdx*/) {
@@ -8286,22 +8833,50 @@ public:
         deviceManager, 1, 64, 1, 64, true, true, true, false);
     addChildComponent(*audioDeviceSelector);
     addChildComponent(broadcastView);
-    addChildComponent(patchbayView);
     addChildComponent(homeLauncherView);
     addChildComponent(recentView);
     addChildComponent(quickSettingsPanel);
 
+    addChildComponent(btnNavMenu);
     addAndMakeVisible(btnNavBack);
     addAndMakeVisible(btnNavHome);
+    addAndMakeVisible(btnNavSearch);
+    addAndMakeVisible(btnNavFav);
     addAndMakeVisible(btnNavRecent);
+    btnNavMenu.setClickingTogglesState(false);
     btnNavBack.setClickingTogglesState(false);
     btnNavHome.setClickingTogglesState(false);
+    btnNavSearch.setClickingTogglesState(false);
+    btnNavFav.setClickingTogglesState(true);
     btnNavRecent.setClickingTogglesState(false);
+
+    // Pre-pin essential shortcuts to Favorites
+    favoriteEntries = {
+        {"Virtual Cable", "SYSTEM", 4, 2, midas_colors::kAccentCyan},
+        {"Patch Matrix", "ROUTING", 1, 0, midas_colors::kAccentGreen},
+        {"Audio Hardware", "SYSTEM", 4, 1, midas_colors::kAccentPurple},
+    };
+
+    btnNavMenu.onClick = [this] {
+      juce::PopupMenu menu;
+      menu.addItem(1, "1. MIX");
+      menu.addItem(2, "2. ROUTING");
+      menu.addItem(3, "3. FX RACK");
+      menu.addItem(4, "4. SHOW");
+      menu.addItem(5, "5. SYSTEM");
+      menu.showMenuAsync(
+          juce::PopupMenu::Options().withTargetComponent(&btnNavMenu),
+          [this](int res) {
+            if (res >= 1 && res <= 5)
+              selectNav(static_cast<MainNavGroup>(res - 1), 0);
+          });
+    };
 
     btnNavBack.onClick = [this] {
       if (homeLauncherView.isVisible() || recentView.isVisible()) {
         homeLauncherView.setVisible(false);
         recentView.setVisible(false);
+        repaint();
         return;
       }
       if (!navHistory.empty()) {
@@ -8309,26 +8884,37 @@ public:
         navHistory.pop_back();
         selectNav(prev.first, prev.second, false);
       } else {
-        openHomeLauncher();
+        openHomeLauncher(false);
       }
     };
     btnNavHome.onClick = [this] {
-      if (homeLauncherView.isVisible())
+      if (homeLauncherView.isVisible()) {
         homeLauncherView.setVisible(false);
-      else
-        openHomeLauncher();
+        repaint();
+      } else {
+        openHomeLauncher(false);
+      }
     };
+    btnNavSearch.onClick = [this] { openHomeLauncher(true); };
+    btnNavFav.onClick = [this] { toggleCurrentPageFavorite(); };
     btnNavRecent.onClick = [this] {
       if (recentView.isVisible()) {
         recentView.setVisible(false);
+        repaint();
       } else {
         homeLauncherView.setVisible(false);
+        recentView.setFavorites(favoriteEntries);
         recentView.setEntries(recentEntries);
         recentView.setVisible(true);
         recentView.toFront(true);
+        repaint();
       }
     };
 
+    homeLauncherView.onPageSelected = [this](int grpIdx, int subPage) {
+      homeLauncherView.setVisible(false);
+      selectNav(static_cast<MainNavGroup>(juce::jlimit(0, 4, grpIdx)), subPage);
+    };
     homeLauncherView.onAppSelected = [this](int appIdx) {
       homeLauncherView.setVisible(false);
       if (appIdx == 0)
@@ -8347,14 +8933,17 @@ public:
       else if (appIdx == 6)
         selectNav(MainNavGroup::Show, 1);
       else if (appIdx == 7)
-        selectNav(MainNavGroup::System, 2);
+        selectNav(MainNavGroup::System, 4);
     };
 
     recentView.onEntrySelected = [this](int grpIdx, int subPage) {
       recentView.setVisible(false);
       selectNav(static_cast<MainNavGroup>(grpIdx), subPage);
     };
-    recentView.onDismiss = [this] { recentView.setVisible(false); };
+    recentView.onDismiss = [this] {
+      recentView.setVisible(false);
+      repaint();
+    };
 
     quickSettingsPanel.onBrightnessChanged = [this](float b) {
       screenBrightness = juce::jlimit(0.35f, 1.0f, b);
@@ -8365,9 +8954,9 @@ public:
       refreshQuickSettings();
     };
     quickSettingsPanel.onOpenAudioSettings = [this] {
-      selectNav(MainNavGroup::System, 3);
+      selectNav(MainNavGroup::System, 1);
     };
-    quickSettingsPanel.onOpenHomeLauncher = [this] { openHomeLauncher(); };
+    quickSettingsPanel.onOpenHomeLauncher = [this] { openHomeLauncher(false); };
 
     statusBar.onOpenQuickSettings = [this] {
       if (quickSettingsPanel.isVisible()) {
@@ -8380,9 +8969,9 @@ public:
       }
     };
 
-    // 5 Main Group Buttons (Row 1)
-    static const char *grpNames[5] = {"1. MIX", "2. ROUTING", "3. FX RACK",
-                                      "4. SHOW", "5. SYSTEM"};
+    // 5 Main Group Buttons (Always reachable in Row 1)
+    static const char *grpNames[5] = {"MIX", "ROUTING", "FX", "SHOW",
+                                      "SYSTEM"};
     static const MidasTactileButton::GlowMode grpGlows[5] = {
         MidasTactileButton::GlowMode::Cyan, MidasTactileButton::GlowMode::Green,
         MidasTactileButton::GlowMode::Gold,
@@ -8641,43 +9230,8 @@ public:
       const auto &state = engine.channels[static_cast<size_t>(chIdx)];
       quickStrip.syncChannel(state);
       dedicatedDsp.syncChannel(state);
-      eqView.setBands(state.eqGainDb[0].load(std::memory_order_relaxed),
-                      state.eqFrequency[0].load(std::memory_order_relaxed),
-                      state.eqGainDb[1].load(std::memory_order_relaxed),
-                      state.eqFrequency[1].load(std::memory_order_relaxed),
-                      state.eqGainDb[2].load(std::memory_order_relaxed),
-                      state.eqFrequency[2].load(std::memory_order_relaxed),
-                      state.eqGainDb[3].load(std::memory_order_relaxed),
-                      state.eqFrequency[3].load(std::memory_order_relaxed),
-                      state.eqQ[0].load(std::memory_order_relaxed),
-                      state.eqQ[1].load(std::memory_order_relaxed),
-                      state.eqQ[2].load(std::memory_order_relaxed),
-                      state.eqQ[3].load(std::memory_order_relaxed));
-      eqView.setHpf(state.highPassEnabled.load(std::memory_order_relaxed),
-                    state.highPassFreqHz.load(std::memory_order_relaxed),
-                    state.highPassSlope.load(std::memory_order_relaxed));
-      eqView.setLpf(state.lowPassEnabled.load(std::memory_order_relaxed),
-                    state.lowPassFreqHz.load(std::memory_order_relaxed),
-                    state.lowPassSlope.load(std::memory_order_relaxed));
-      eqView.setEqEnabled(state.eqEnabled.load(std::memory_order_relaxed));
-      eqView.setDynEqGains(
-          state.dynEqGainDb[0].load(std::memory_order_relaxed),
-          state.dynEqGainDb[1].load(std::memory_order_relaxed),
-          state.dynEqGainDb[2].load(std::memory_order_relaxed),
-          state.dynEqGainDb[3].load(std::memory_order_relaxed));
 
-      compView.syncState(
-          state.compressorThresholdDb.load(std::memory_order_relaxed),
-          state.compressorRatio.load(std::memory_order_relaxed),
-          state.compressorAttackMs.load(std::memory_order_relaxed),
-          state.compressorReleaseMs.load(std::memory_order_relaxed),
-          state.compressorGainReductionDb.load(std::memory_order_relaxed));
 
-      gateView.syncState(state.gateThresholdDb.load(std::memory_order_relaxed),
-                         state.gateRatio.load(std::memory_order_relaxed),
-                         state.gateAttackMs.load(std::memory_order_relaxed),
-                         state.gateReleaseMs.load(std::memory_order_relaxed),
-                         state.gateReductionDb.load(std::memory_order_relaxed));
 
       std::array<bool, 8> tileStates{};
       tileStates[0] = state.masterAssigned.load(std::memory_order_relaxed);
@@ -8692,7 +9246,6 @@ public:
       tileStates[6] = (state.vcaGroup.load(std::memory_order_relaxed) == 1);
       tileStates[7] = state.muteSafe.load(std::memory_order_relaxed);
       routingView.setTileStates(tileStates);
-      eqPanelView.setSelectedChannel(chIdx);
       dynamicEqView.setSelectedChannel(chIdx);
       dynamicsPanelView.setSelectedChannel(chIdx);
       surroundPanView.setSelectedChannel(chIdx);
@@ -8731,7 +9284,6 @@ public:
       selVca = engine.channels[static_cast<size_t>(chIdx)].vcaGroup.load(
           std::memory_order_relaxed);
 
-    vcaView.syncVcaState(vcaCounts, vcaLevels, vcaMutes, selVca);
   }
 
   void applyConsoleScene(int sceneId) {
@@ -8791,10 +9343,6 @@ public:
 
     // 2. Hide all dynamic components
     overviewView.setVisible(false);
-    eqView.setVisible(false);
-    compView.setVisible(false);
-    gateView.setVisible(false);
-    eqPanelView.setVisible(false);
     dynamicEqView.setVisible(false);
     dynamicsPanelView.setVisible(false);
     aiModal.setVisible(false);
@@ -8807,7 +9355,6 @@ public:
     surroundPanView.setVisible(false);
     vcaPanelView.setVisible(false);
     routingView.setVisible(false);
-    vcaView.setVisible(false);
 
     fxHostView.setVisible(false);
 
@@ -8823,7 +9370,6 @@ public:
     if (audioDeviceSelector)
       audioDeviceSelector->setVisible(false);
     broadcastView.setVisible(false);
-    patchbayView.setVisible(false);
 
     // 3. Define and show active subpage
     updateSubTabs();
@@ -8870,8 +9416,7 @@ public:
       defs = {{"PATCH MATRIX", MidasTactileButton::GlowMode::Green},
               {"3D SURROUND", MidasTactileButton::GlowMode::Cyan},
               {"VCA GROUPS", MidasTactileButton::GlowMode::Gold},
-              {"BUS & DIRECT", MidasTactileButton::GlowMode::Cyan},
-              {"TALKBACK ROUTER", MidasTactileButton::GlowMode::Purple}};
+              {"BUS & DIRECT", MidasTactileButton::GlowMode::Cyan}};
       activeSubPage = juce::jlimit(0, (int)defs.size() - 1, activeSubPage);
       if (activeSubPage == 0)
         patchMatrixView.setVisible(true);
@@ -8881,8 +9426,6 @@ public:
         vcaPanelView.setVisible(true);
       else if (activeSubPage == 3)
         routingView.setVisible(true);
-      else if (activeSubPage == 4)
-        talkbackView.setVisible(true);
     } else if (activeGroup == MainNavGroup::Fx) {
       defs = {{"24-SLOT RACK", MidasTactileButton::GlowMode::Gold},
               {"DSP MODELS", MidasTactileButton::GlowMode::Cyan}};
@@ -8898,7 +9441,8 @@ public:
       defs = {{"CUE LIST", MidasTactileButton::GlowMode::Green},
               {"64-CH RECORDER", MidasTactileButton::GlowMode::Cyan},
               {"OFFLINE BOUNCE", MidasTactileButton::GlowMode::Purple},
-              {"SCENE OVERVIEW", MidasTactileButton::GlowMode::Gold}};
+              {"SCENE OVERVIEW", MidasTactileButton::GlowMode::Gold},
+              {"BROADCAST STEMS", MidasTactileButton::GlowMode::Gold}};
       activeSubPage = juce::jlimit(0, (int)defs.size() - 1, activeSubPage);
       if (activeSubPage == 0)
         fullCueListView.setVisible(true);
@@ -8908,27 +9452,27 @@ public:
         offlineBounceView.setVisible(true);
       else if (activeSubPage == 3)
         cuelistView.setVisible(true);
+      else if (activeSubPage == 4)
+        broadcastView.setVisible(true);
     } else if (activeGroup == MainNavGroup::System) {
+      // Grouped: Audio I/O (0-2) | Remote (3) | Setup (4)
       defs = {{"ASIO BRIDGE", MidasTactileButton::GlowMode::Cyan},
-              {"OSC SERVER", MidasTactileButton::GlowMode::Green},
-              {"CONSOLE SETUP", MidasTactileButton::GlowMode::Cyan},
               {"AUDIO HARDWARE", MidasTactileButton::GlowMode::Purple},
-              {"BROADCAST STEMS", MidasTactileButton::GlowMode::Gold},
-              {"VIRTUAL CABLE", MidasTactileButton::GlowMode::Cyan}};
+              {"VIRTUAL CABLE", MidasTactileButton::GlowMode::Cyan},
+              {"OSC SERVER", MidasTactileButton::GlowMode::Green},
+              {"CONSOLE SETUP", MidasTactileButton::GlowMode::Cyan}};
       activeSubPage = juce::jlimit(0, (int)defs.size() - 1, activeSubPage);
       if (activeSubPage == 0)
         asioBridgeView.setVisible(true);
-      else if (activeSubPage == 1)
-        oscServerView.setVisible(true);
-      else if (activeSubPage == 2)
-        setupView.setVisible(true);
-      else if (activeSubPage == 3) {
+      else if (activeSubPage == 1) {
         if (audioDeviceSelector)
           audioDeviceSelector->setVisible(true);
-      } else if (activeSubPage == 4)
-        broadcastView.setVisible(true);
-      else if (activeSubPage == 5)
+      } else if (activeSubPage == 2)
         virtualCableView.setVisible(true);
+      else if (activeSubPage == 3)
+        oscServerView.setVisible(true);
+      else if (activeSubPage == 4)
+        setupView.setVisible(true);
     }
 
     for (size_t i = 0; i < subTabButtons.size(); ++i) {
@@ -8944,12 +9488,18 @@ public:
     }
 
     if (activeSubPage >= 0 && activeSubPage < static_cast<int>(defs.size())) {
-      static const char *grpTags[5] = {"MIX", "ROUTING", "FX RACK", "SHOW",
+      static const char *grpTags[5] = {"MIX", "ROUTING", "FX", "SHOW",
                                        "SYSTEM"};
       const int gInt = juce::jlimit(0, 4, static_cast<int>(activeGroup));
+      activeGroupTag = grpTags[gInt];
+      activePageTitle = defs[static_cast<size_t>(activeSubPage)].label;
+      activeBreadcrumbText = activeGroupTag + "  >  " + activePageTitle;
+      btnNavMenu.setButtonText(activeGroupTag + " v");
+      homeLauncherView.setActivePage(gInt, activeSubPage);
+
       AndroidRecentWorkspaceView::Entry entry;
-      entry.title = defs[static_cast<size_t>(activeSubPage)].label;
-      entry.groupLabel = grpTags[gInt];
+      entry.title = activePageTitle;
+      entry.groupLabel = activeGroupTag;
       entry.groupIdx = gInt;
       entry.subPage = activeSubPage;
       entry.accent =
@@ -8963,6 +9513,7 @@ public:
                                 MidasTactileButton::GlowMode::Purple
                             ? midas_colors::kAccentPurple
                             : midas_colors::kAccentCyan));
+      activePageAccent = entry.accent;
       recentEntries.erase(
           std::remove_if(recentEntries.begin(), recentEntries.end(),
                          [&](const auto &e) {
@@ -8975,9 +9526,55 @@ public:
         recentEntries.resize(6);
     }
 
+    btnNavFav.setToggleState(isCurrentPageFavorite(),
+                             juce::dontSendNotification);
     resized();
     repaint();
   }
+
+  juce::String getActiveBreadcrumb() const { return activeBreadcrumbText; }
+
+  bool isGroupButtonBarVisible() const {
+    return groupButtons[0] != nullptr && groupButtons[0]->isVisible();
+  }
+
+  bool isCurrentPageFavorite() const {
+    const int g = static_cast<int>(activeGroup);
+    for (const auto &f : favoriteEntries) {
+      if (f.groupIdx == g && f.subPage == activeSubPage)
+        return true;
+    }
+    return false;
+  }
+
+  void toggleCurrentPageFavorite() {
+    const int g = static_cast<int>(activeGroup);
+    auto it = std::find_if(favoriteEntries.begin(), favoriteEntries.end(),
+                           [&](const auto &f) {
+                             return f.groupIdx == g &&
+                                    f.subPage == activeSubPage;
+                           });
+    if (it != favoriteEntries.end()) {
+      favoriteEntries.erase(it);
+    } else {
+      AndroidRecentWorkspaceView::Entry entry;
+      entry.title = activePageTitle;
+      entry.groupLabel = activeGroupTag;
+      entry.groupIdx = g;
+      entry.subPage = activeSubPage;
+      entry.accent = activePageAccent;
+      favoriteEntries.insert(favoriteEntries.begin(), entry);
+      if (favoriteEntries.size() > 6)
+        favoriteEntries.resize(6);
+    }
+    btnNavFav.setToggleState(isCurrentPageFavorite(),
+                             juce::dontSendNotification);
+    syncLauncherFavorites();
+    if (recentView.isVisible())
+      recentView.setFavorites(favoriteEntries);
+  }
+
+  AndroidHomeLauncherView &getHomeLauncherView() { return homeLauncherView; }
 
   void switchTouchTab(int index) {
     if (index == 0)
@@ -8995,7 +9592,7 @@ public:
     else if (index == 6)
       selectNav(MainNavGroup::Fx, 0); // 24-Slot FX Rack
     else if (index == 7)
-      selectNav(MainNavGroup::System, 3); // Audio Hardware
+      selectNav(MainNavGroup::System, 1); // Audio Hardware
     else if (index == 8)
       selectNav(MainNavGroup::Show, 1); // 64-Ch Recorder
     else if (index == 9)
@@ -9003,7 +9600,7 @@ public:
     else if (index == 10)
       selectNav(MainNavGroup::Show, 0); // Cue List
     else if (index == 11)
-      selectNav(MainNavGroup::System, 2); // Console Setup
+      selectNav(MainNavGroup::System, 4); // Console Setup
   }
 
   void openChannelAiModal() {
@@ -9040,6 +9637,33 @@ public:
     g.fillRoundedRectangle(touchRect, 10.0f);
     g.setColour(midas_colors::kBorderCol);
     g.drawRoundedRectangle(touchRect, 10.0f, 1.2f);
+
+    // Header separator between Row 1 (Group/Breadcrumb/Nav) & Row 2 (Sub-tabs)
+    g.setColour(juce::Colour(0xff142033));
+    g.drawHorizontalLine(static_cast<int>(topY + 26.0f), 12.0f,
+                         touchW - 4.0f);
+
+    // Persistent Location Breadcrumb Pill
+    if (breadcrumbBounds.getWidth() > 54) {
+      const bool inHome = homeLauncherView.isVisible();
+      const bool inRecent = recentView.isVisible();
+      const juce::Colour pillAcc =
+          inHome ? midas_colors::kAccentGold
+                 : (inRecent ? midas_colors::kAccentPurple : activePageAccent);
+      const juce::String pillText =
+          inHome ? "HOME  >  DIRECTORY & SEARCH"
+                 : (inRecent ? "FAVORITES & RECENT WORKSPACE"
+                             : activeBreadcrumbText);
+      auto bRect = breadcrumbBounds.toFloat();
+      g.setColour(juce::Colour(0xff0c1524));
+      g.fillRoundedRectangle(bRect, 5.0f);
+      g.setColour(pillAcc.withAlpha(0.45f));
+      g.drawRoundedRectangle(bRect, 5.0f, 1.0f);
+      g.setFont(midas_ui::getFont(9.5f, true));
+      g.setColour(pillAcc);
+      g.drawText(pillText, breadcrumbBounds.reduced(6, 0),
+                 juce::Justification::centred, true);
+    }
 
     // Chassis Corner Screws (Reference Hardware Touring Deck Inset)
     const float layerY = topY + upperH + 6.0f;
@@ -9087,66 +9711,100 @@ public:
 
     dedicatedDsp.setVisible(!isWideTouchGroup);
 
-    // Single Compact Android Top Bar: Context Sub-Tabs (Left) + Nav Bar (<
-    // BACK, HOME, RECENT) (Right)
-    for (int i = 0; i < 5; ++i) {
-      if (groupButtons[i] != nullptr) {
-        groupButtons[i]->setVisible(false);
-        groupButtons[i]->setBounds(0, 0, 0, 0);
+    // Row 1: Always-accessible Main Groups (Left, or Menu drawer on narrow
+    // screens) + Breadcrumb Pill (Center) + Back/Home/Find/Fav/Recent (Right)
+    const float row1Y = topY + 3.0f;
+    const float rowH = 22.0f;
+    const float navAreaW = 262.0f;
+    const float navX = touchW - navAreaW + 2.0f;
+
+    btnNavBack.setBounds(static_cast<int>(navX), static_cast<int>(row1Y), 52,
+                         static_cast<int>(rowH));
+    btnNavHome.setBounds(static_cast<int>(navX + 55.0f),
+                         static_cast<int>(row1Y), 46, static_cast<int>(rowH));
+    btnNavSearch.setBounds(static_cast<int>(navX + 104.0f),
+                           static_cast<int>(row1Y), 46,
+                           static_cast<int>(rowH));
+    btnNavFav.setBounds(static_cast<int>(navX + 153.0f),
+                        static_cast<int>(row1Y), 48, static_cast<int>(rowH));
+    btnNavRecent.setBounds(static_cast<int>(navX + 204.0f),
+                           static_cast<int>(row1Y), 56,
+                           static_cast<int>(rowH));
+
+    float leftEndX = 12.0f;
+    const bool showInlineGroups = (touchW >= 740.0f);
+    if (showInlineGroups) {
+      btnNavMenu.setVisible(false);
+      const float grpW = 56.0f;
+      const float grpGap = 3.0f;
+      for (int i = 0; i < 5; ++i) {
+        if (groupButtons[i] != nullptr) {
+          groupButtons[i]->setVisible(true);
+          groupButtons[i]->setBounds(
+              static_cast<int>(12.0f + static_cast<float>(i) * (grpW + grpGap)),
+              static_cast<int>(row1Y), static_cast<int>(grpW),
+              static_cast<int>(rowH));
+        }
       }
+      leftEndX = 12.0f + 5.0f * grpW + 4.0f * grpGap;
+    } else {
+      for (int i = 0; i < 5; ++i) {
+        if (groupButtons[i] != nullptr) {
+          groupButtons[i]->setVisible(false);
+          groupButtons[i]->setBounds(0, 0, 0, 0);
+        }
+      }
+      btnNavMenu.setVisible(true);
+      btnNavMenu.setBounds(12, static_cast<int>(row1Y), 90,
+                           static_cast<int>(rowH));
+      leftEndX = 102.0f;
     }
 
-    const float navAreaW = 196.0f;
-    const float navX = touchW - navAreaW;
-    btnNavBack.setBounds(static_cast<int>(navX), static_cast<int>(topY + 4.0f),
-                         62, 24);
-    btnNavHome.setBounds(static_cast<int>(navX + 66.0f),
-                         static_cast<int>(topY + 4.0f), 62, 24);
-    btnNavRecent.setBounds(static_cast<int>(navX + 132.0f),
-                           static_cast<int>(topY + 4.0f), 64, 24);
+    const int bcX = static_cast<int>(leftEndX + 8.0f);
+    const int bcRight = static_cast<int>(navX - 8.0f);
+    breadcrumbBounds =
+        juce::Rectangle<int>(bcX, static_cast<int>(row1Y),
+                             std::max(0, bcRight - bcX), static_cast<int>(rowH));
 
+    // Row 2: Dynamic Context Sub-Tabs across touchscreen width
+    const float row2Y = topY + 28.0f;
     int visibleSubCount = 0;
     for (size_t i = 0; i < subTabButtons.size(); ++i) {
       if (subTabButtons[i]->isVisible())
         visibleSubCount++;
     }
     if (visibleSubCount > 0) {
-      const float subAvailW = std::max(120.0f, navX - 18.0f);
+      const float subAvailW = std::max(120.0f, touchW - 14.0f);
       const float subBtnW = subAvailW / static_cast<float>(visibleSubCount);
       int subIdx = 0;
       for (size_t i = 0; i < subTabButtons.size(); ++i) {
         if (subTabButtons[i]->isVisible()) {
           subTabButtons[i]->setBounds(
               static_cast<int>(12.0f + subIdx * subBtnW),
-              static_cast<int>(topY + 4.0f), static_cast<int>(subBtnW - 3.0f),
-              24);
+              static_cast<int>(row2Y), static_cast<int>(subBtnW - 3.0f),
+              static_cast<int>(rowH));
           subIdx++;
         }
       }
     }
 
-    // Touchscreen Swappable Views (All Embedded - Full Spacious Height)
-    const float viewY = topY + 32.0f;
+    // Touchscreen Swappable Views (All Embedded - Below 2-row Header)
+    const float viewY = topY + 53.0f;
     const bool isFullHeightView = true;
     const float quickH = 0.0f;
-    const float viewH = upperH - 36.0f;
+    const float viewH = upperH - 57.0f;
     const float viewW = touchW - 16.0f;
 
     auto viewBounds =
         juce::Rectangle<int>(16, static_cast<int>(viewY),
                              static_cast<int>(viewW), static_cast<int>(viewH));
     overviewView.setBounds(viewBounds);
-    eqView.setBounds(viewBounds);
-    compView.setBounds(viewBounds);
-    gateView.setBounds(viewBounds);
-    eqPanelView.setBounds(viewBounds);
     dynamicEqView.setBounds(viewBounds);
     dynamicsPanelView.setBounds(viewBounds);
     aiModal.setBounds(viewBounds);
     dspModal.setBounds(viewBounds);
     duganView.setBounds(viewBounds);
     routingView.setBounds(viewBounds);
-    vcaView.setBounds(viewBounds);
     vcaPanelView.setBounds(viewBounds);
     patchMatrixView.setBounds(viewBounds);
     surroundPanView.setBounds(viewBounds);
@@ -9156,7 +9814,6 @@ public:
     recentView.setBounds(viewBounds);
     quickSettingsPanel.setBounds(getLocalBounds());
     recorderView.setBounds(viewBounds);
-    patchbayView.setBounds(viewBounds);
     cuelistView.setBounds(viewBounds);
     fullCueListView.setBounds(viewBounds);
     offlineBounceView.setBounds(viewBounds);
@@ -9172,11 +9829,7 @@ public:
     auto talkBounds = monBounds.removeFromRight(
         static_cast<int>(viewBounds.getWidth() * 0.44f));
     monitorView.setBounds(monBounds.reduced(2));
-    if (activeGroup == MainNavGroup::Routing && activeSubPage == 5) {
-      talkbackView.setBounds(viewBounds);
-    } else {
-      talkbackView.setBounds(talkBounds.reduced(2));
-    }
+    talkbackView.setBounds(talkBounds.reduced(2));
 
     // Quick channel strip
     quickStrip.setVisible(!isFullHeightView);
@@ -9345,10 +9998,6 @@ private:
             en, std::memory_order_relaxed);
         engine.channels[static_cast<size_t>(ch)].highPassFreqHz.store(
             freq, std::memory_order_relaxed);
-        eqView.setHpf(
-            en, freq,
-            engine.channels[static_cast<size_t>(ch)].highPassSlope.load(
-                std::memory_order_relaxed));
       }
     };
     quickStrip.onDelayChanged = [this](bool en, float ms) {
@@ -9459,116 +10108,8 @@ private:
       selectChannel(selectedSlot);
     };
 
-    // Touchscreen Interactive Visualizer Callbacks (Fase 2)
-    eqView.onNodeDragged = [this](int band, float gain, float freq) {
-      const int ch = getEngineChannelForSlot(selectedSlot);
-      if (ch >= 0 && ch < static_cast<int>(engine.channels.size()) &&
-          band >= 0 && band < 4) {
-        engine.channels[static_cast<size_t>(ch)]
-            .eqGainDb[static_cast<size_t>(band)]
-            .store(gain, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)]
-            .eqFrequency[static_cast<size_t>(band)]
-            .store(freq, std::memory_order_relaxed);
-        dedicatedDsp.syncChannel(engine.channels[static_cast<size_t>(ch)]);
-        int partnerCh = -1;
-        if (engine.isChannelStereoLinked(ch, &partnerCh) && partnerCh >= 0 &&
-            partnerCh < static_cast<int>(engine.channels.size())) {
-          engine.channels[static_cast<size_t>(partnerCh)]
-              .eqGainDb[static_cast<size_t>(band)]
-              .store(gain, std::memory_order_relaxed);
-          engine.channels[static_cast<size_t>(partnerCh)]
-              .eqFrequency[static_cast<size_t>(band)]
-              .store(freq, std::memory_order_relaxed);
-        }
-      }
-    };
-    eqView.onQChanged = [this](int band, float q) {
-      const int ch = getEngineChannelForSlot(selectedSlot);
-      if (ch >= 0 && ch < static_cast<int>(engine.channels.size()) &&
-          band >= 0 && band < 4) {
-        engine.channels[static_cast<size_t>(ch)]
-            .eqQ[static_cast<size_t>(band)]
-            .store(q, std::memory_order_relaxed);
-        int partnerCh = -1;
-        if (engine.isChannelStereoLinked(ch, &partnerCh) && partnerCh >= 0 &&
-            partnerCh < static_cast<int>(engine.channels.size())) {
-          engine.channels[static_cast<size_t>(partnerCh)]
-              .eqQ[static_cast<size_t>(band)]
-              .store(q, std::memory_order_relaxed);
-        }
-      }
-    };
-    eqView.onFlatClicked = [this] {
-      const int ch = getEngineChannelForSlot(selectedSlot);
-      if (ch >= 0 && ch < static_cast<int>(engine.channels.size())) {
-        for (int b = 0; b < 4; ++b)
-          engine.channels[static_cast<size_t>(ch)]
-              .eqGainDb[static_cast<size_t>(b)]
-              .store(0.0f, std::memory_order_relaxed);
-        dedicatedDsp.syncChannel(engine.channels[static_cast<size_t>(ch)]);
-        int partnerCh = -1;
-        if (engine.isChannelStereoLinked(ch, &partnerCh) && partnerCh >= 0 &&
-            partnerCh < static_cast<int>(engine.channels.size())) {
-          for (int b = 0; b < 4; ++b)
-            engine.channels[static_cast<size_t>(partnerCh)]
-                .eqGainDb[static_cast<size_t>(b)]
-                .store(0.0f, std::memory_order_relaxed);
-        }
-      }
-    };
-    eqView.onEqInToggled = [this](bool enabled) {
-      const int ch = getEngineChannelForSlot(selectedSlot);
-      if (ch >= 0 && ch < static_cast<int>(engine.channels.size())) {
-        auto &st = engine.channels[static_cast<size_t>(ch)];
-        st.eqEnabled.store(enabled, std::memory_order_relaxed);
-        dedicatedDsp.setEqInState(enabled);
-        int partnerCh = -1;
-        if (engine.isChannelStereoLinked(ch, &partnerCh) && partnerCh >= 0 &&
-            partnerCh < static_cast<int>(engine.channels.size())) {
-          engine.channels[static_cast<size_t>(partnerCh)].eqEnabled.store(
-              enabled, std::memory_order_relaxed);
-        }
-      }
-    };
-    eqView.onOpenDynEq = [this] { selectNav(MainNavGroup::Mix, 1); };
-    eqView.onOpenChannelAi = [this] { openChannelAiModal(); };
 
-    compView.onParamsChanged = [this](float thr, float rat, float att,
-                                      float rel, float /*gain*/) {
-      const int ch = getEngineChannelForSlot(selectedSlot);
-      if (ch >= 0 && ch < static_cast<int>(engine.channels.size())) {
-        engine.channels[static_cast<size_t>(ch)].compressorEnabled.store(
-            true, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].compressorThresholdDb.store(
-            thr, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].compressorRatio.store(
-            rat, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].compressorAttackMs.store(
-            att, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].compressorReleaseMs.store(
-            rel, std::memory_order_relaxed);
-        dedicatedDsp.syncChannel(engine.channels[static_cast<size_t>(ch)]);
-      }
-    };
-    compView.onOpenDynamics = [this] { selectNav(MainNavGroup::Mix, 2); };
 
-    gateView.onParamsChanged = [this](float thr, float range, float att,
-                                      float rel) {
-      const int ch = getEngineChannelForSlot(selectedSlot);
-      if (ch >= 0 && ch < static_cast<int>(engine.channels.size())) {
-        engine.channels[static_cast<size_t>(ch)].gateEnabled.store(
-            true, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].gateThresholdDb.store(
-            thr, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].gateRatio.store(
-            range, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].gateAttackMs.store(
-            att, std::memory_order_relaxed);
-        engine.channels[static_cast<size_t>(ch)].gateReleaseMs.store(
-            rel, std::memory_order_relaxed);
-      }
-    };
 
     // Multitrack Recorder bindings (Transport & Dedicated USB Button)
     auto handleRecToggle = [this](bool startRec) {
@@ -9702,41 +10243,6 @@ private:
     };
 
     // Fase 3 & 5: Manic VCA Membership & Motorized DCA Engine (Tab 5)
-    vcaView.onOpenVcaPanel = [this] { selectNav(MainNavGroup::Routing, 2); };
-    vcaView.onOpenPopGroups = [this] { selectNav(MainNavGroup::Routing, 2); };
-    vcaView.onVcaMuteToggled = [this](int vcaIdx, bool muted) {
-      if (vcaIdx >= 0 && vcaIdx < 8)
-        engine.vcaMuted[static_cast<size_t>(vcaIdx)].store(
-            muted, std::memory_order_relaxed);
-    };
-    vcaView.onVcaSoloToggled = [this](int vcaIdx, bool solo) {
-      const int targetGroup = vcaIdx + 1;
-      for (auto &ch : engine.channels) {
-        if (ch.vcaGroup.load(std::memory_order_relaxed) == targetGroup)
-          ch.solo.store(solo, std::memory_order_relaxed);
-      }
-    };
-    vcaView.onVcaTileClicked = [this](int vcaIdx) {
-      const int chIdx = getEngineChannelForSlot(selectedSlot);
-      if (chIdx >= 0 && chIdx < static_cast<int>(engine.channels.size())) {
-        auto &ch = engine.channels[static_cast<size_t>(chIdx)];
-        const int curGroup = ch.vcaGroup.load(std::memory_order_relaxed);
-        const int nextGroup = (curGroup == (vcaIdx + 1)) ? 0 : (vcaIdx + 1);
-        ch.vcaGroup.store(nextGroup, std::memory_order_relaxed);
-        int partner = -1;
-        if (engine.isChannelStereoLinked(chIdx, &partner) && partner >= 0 &&
-            partner < static_cast<int>(engine.channels.size())) {
-          engine.channels[static_cast<size_t>(partner)].vcaGroup.store(
-              nextGroup, std::memory_order_relaxed);
-        }
-        selectChannel(selectedSlot);
-      }
-    };
-    vcaView.onVcaLevelChanged = [this](int vcaIdx, float levelDb) {
-      if (vcaIdx >= 0 && vcaIdx < 8)
-        engine.vcaMasterDb[static_cast<size_t>(vcaIdx)].store(
-            levelDb, std::memory_order_relaxed);
-    };
 
     // Fase 3 & 5: Quad Stereo FX Rack Engines & Dedicated Hardware FX Editors
     // (Tab 7)
@@ -9785,21 +10291,10 @@ private:
 
     // Fase 5: Broadcast Talkback & Control Room Monitor Panels (Tab 8)
     broadcastView.onOpenTalkback = [this] {
-      selectNav(MainNavGroup::Routing, 4);
+      selectNav(MainNavGroup::Mix, 5);
     };
     broadcastView.onOpenMonitorCr = [this] { selectNav(MainNavGroup::Mix, 5); };
 
-    // Fase 3: Stagebox Hardware Patchbay & Crosspoints (Tab 10)
-    patchbayView.onOpenPatchMatrix = [this] {
-      selectNav(MainNavGroup::Routing, 0);
-    };
-    patchbayView.onPatchTileToggled = [this](int patchIdx, bool active) {
-      if (patchIdx >= 0 && patchIdx < 8 &&
-          patchIdx < static_cast<int>(engine.channels.size())) {
-        engine.channels[static_cast<size_t>(patchIdx)].sourceInput.store(
-            active ? patchIdx : -1, std::memory_order_relaxed);
-      }
-    };
 
     // Fase 3: Theatre Cue List & Scene Automation (Tab 11 & Top Status Bar)
     cuelistView.onCueRecalled = [this](int sceneId) {
@@ -10841,8 +11336,6 @@ private:
       const float gateGr =
           curCh.gateReductionDb.load(std::memory_order_relaxed);
 
-      compView.setTelemetry(compGr, curPeakDb);
-      gateView.setTelemetry(gateGr, curPeakDb);
       if (engine.rtaAnalyzer.hasNewData()) {
         std::array<double, nova::graviton::DualFFTAnalyzer::kFFTHalf> specA{},
             specB{}, coh{}, tf{};
@@ -10864,15 +11357,8 @@ private:
           bands64[static_cast<size_t>(i)] = juce::jlimit(
               0.0f, 1.0f, static_cast<float>((maxDb + 60.0) / 60.0));
         }
-        eqView.setRtaSpectrum(bands64.data(), 64);
       } else {
-        eqView.setRtaFromLevel(curPeakDb);
       }
-      eqView.setDynEqGains(
-          curCh.dynEqGainDb[0].load(std::memory_order_relaxed),
-          curCh.dynEqGainDb[1].load(std::memory_order_relaxed),
-          curCh.dynEqGainDb[2].load(std::memory_order_relaxed),
-          curCh.dynEqGainDb[3].load(std::memory_order_relaxed));
     }
 
     // Priority 3: Real-time Monitor FIFO Depth & Overrun/Underrun Telemetry
@@ -10905,10 +11391,25 @@ private:
     }
   }
 
-  void openHomeLauncher() {
+  void syncLauncherFavorites() {
+    std::vector<std::pair<int, int>> keys;
+    keys.reserve(favoriteEntries.size());
+    for (const auto &f : favoriteEntries)
+      keys.push_back({f.groupIdx, f.subPage});
+    homeLauncherView.setFavorites(keys);
+  }
+
+  void openHomeLauncher(bool focusSearchField = false) {
     recentView.setVisible(false);
+    homeLauncherView.setActivePage(static_cast<int>(activeGroup), activeSubPage);
+    syncLauncherFavorites();
+    if (focusSearchField)
+      homeLauncherView.clearSearch();
     homeLauncherView.setVisible(true);
     homeLauncherView.toFront(true);
+    if (focusSearchField)
+      homeLauncherView.focusSearch();
+    repaint();
   }
 
   void refreshQuickSettings() {
@@ -10990,10 +11491,6 @@ private:
   // MIX GROUP (Embedded: Overview, PEQ, Dynamic EQ, Dynamics, Dugan, Monitor &
   // Talkback)
   MidasOverviewView overviewView;
-  MidasEqCurveView eqView;
-  MidasCompView compView;
-  MidasGateView gateView;
-  EqPanel eqPanelView;
   DynamicEqPanel dynamicEqView;
   DynamicsPanel dynamicsPanelView;
   DuganAutomixerPanel duganView;
@@ -11006,7 +11503,6 @@ private:
   SurroundPanPanel surroundPanView;
   VcaPanel vcaPanelView;
   MidasRoutingMatrixView routingView;
-  MidasVcaView vcaView;
 
   // FX GROUP (Embedded Host: 24-Slot Rack + Quad Summary + Dedicated DSP
   // Editors)
@@ -11025,7 +11521,6 @@ private:
   MidasSetupView setupView;
   std::unique_ptr<juce::AudioDeviceSelectorComponent> audioDeviceSelector;
   MidasBroadcastView broadcastView;
-  MidasPatchbayView patchbayView;
 
   MidasQuickStrip quickStrip;
   MidasDedicatedDspPanel dedicatedDsp;
@@ -11043,12 +11538,19 @@ private:
   MidasAiModal aiModal;
   MidasMCloudModal mcloudModal;
 
-  MidasTactileButton btnNavBack, btnNavHome, btnNavRecent;
+  MidasTactileButton btnNavMenu, btnNavBack, btnNavHome, btnNavSearch,
+      btnNavFav, btnNavRecent;
   AndroidHomeLauncherView homeLauncherView;
   AndroidRecentWorkspaceView recentView;
   AndroidQuickSettingsPanel quickSettingsPanel;
   std::vector<std::pair<MainNavGroup, int>> navHistory;
   std::vector<AndroidRecentWorkspaceView::Entry> recentEntries;
+  std::vector<AndroidRecentWorkspaceView::Entry> favoriteEntries;
+  juce::Rectangle<int> breadcrumbBounds;
+  juce::String activeGroupTag{"MIX"};
+  juce::String activePageTitle{"OVERVIEW"};
+  juce::String activeBreadcrumbText{"MIX  >  OVERVIEW"};
+  juce::Colour activePageAccent{midas_colors::kAccentCyan};
   float screenBrightness = 1.0f;
 
   nova::SecondaryAudioStreamer *secondaryStreamer = nullptr;

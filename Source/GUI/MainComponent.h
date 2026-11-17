@@ -55,7 +55,7 @@ public:
     settings.setButtonText("AUDIO SETTINGS");
     settings.onClick = [this] {
       if (midasSurface) {
-        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::System, 3);
+        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::System, 1);
         return;
       }
       juce::DialogWindow::LaunchOptions options;
@@ -74,7 +74,7 @@ public:
         "Show audio device, format, routing counts and runtime status");
     diagnosticsButton.onClick = [this] {
       if (midasSurface) {
-        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::System, 2);
+        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::System, 4);
         return;
       }
       auto *device = deviceManager.getCurrentAudioDevice();
@@ -316,7 +316,7 @@ public:
                                 "Dialog (Sine / Pink / White)");
     oscillatorButton.onClick = [this] {
       if (midasSurface) {
-        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::System, 2);
+        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::System, 4);
         return;
       }
       juce::DialogWindow::LaunchOptions options;
@@ -471,7 +471,7 @@ public:
                              juce::Colour(0xffda3633));
     talkbackButton.onClick = [this] {
       if (midasSurface) {
-        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::Routing, 4);
+        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::Mix, 5);
         return;
       }
       juce::DialogWindow::LaunchOptions options;
@@ -491,7 +491,7 @@ public:
                         juce::Colour(0xff1f6feb));
     oscButton.onClick = [this] {
       if (midasSurface) {
-        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::System, 1);
+        midasSurface->selectNav(MidasTouringConsoleSurface::MainNavGroup::System, 3);
         return;
       }
       juce::DialogWindow::LaunchOptions options;

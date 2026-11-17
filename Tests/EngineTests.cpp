@@ -7142,9 +7142,9 @@ public:
                "Active subpage should match");
       }
 
-      // Routing subpages: Patch Matrix, 3D Surround, VCA, Bus & Direct,
-      // Talkback Router (Matrix Plus removed)
-      for (int sub = 0; sub <= 4; ++sub) {
+      // Routing subpages: Patch Matrix, 3D Surround, VCA, Bus & Direct
+      // (Talkback lives only in Mix > Monitor & Talkback)
+      for (int sub = 0; sub <= 3; ++sub) {
         consoleSurface->selectNav(Group::Routing, sub);
         expect(consoleSurface->getActiveGroup() == Group::Routing,
                "Active group should be Routing");
@@ -7161,8 +7161,9 @@ public:
                "Active subpage should match");
       }
 
-      // Show subpages: Cue List, 64-Ch Recorder, Offline Bounce, Scene Overview
-      for (int sub = 0; sub <= 3; ++sub) {
+      // Show subpages: Cue List, 64-Ch Recorder, Offline Bounce, Scene
+      // Overview, Broadcast Stems
+      for (int sub = 0; sub <= 4; ++sub) {
         consoleSurface->selectNav(Group::Show, sub);
         expect(consoleSurface->getActiveGroup() == Group::Show,
                "Active group should be Show");
@@ -7170,8 +7171,8 @@ public:
                "Active subpage should match");
       }
 
-      // System subpages: Audio I/O & ASIO, OSC Server, Console Setup, Audio
-      // Hardware, Broadcast Stems
+      // System subpages: ASIO Bridge, Audio Hardware, Virtual Cable, OSC
+      // Server, Console Setup
       for (int sub = 0; sub <= 4; ++sub) {
         consoleSurface->selectNav(Group::System, sub);
         expect(consoleSurface->getActiveGroup() == Group::System,
@@ -7179,6 +7180,58 @@ public:
         expect(consoleSurface->getActiveSubPage() == sub,
                "Active subpage should match");
       }
+
+      // 1b. Persistent Group Bar, Breadcrumb, Search & Favorites
+      expect(consoleSurface->isGroupButtonBarVisible(),
+             "Main group buttons must be visible on wide surface");
+      consoleSurface->selectNav(Group::System, 2); // Virtual Cable
+      expect(consoleSurface->getActiveBreadcrumb().contains("SYSTEM") &&
+                 consoleSurface->getActiveBreadcrumb().contains(
+                     "VIRTUAL CABLE"),
+             "Breadcrumb must show SYSTEM > VIRTUAL CABLE");
+      expect(consoleSurface->isCurrentPageFavorite(),
+             "Virtual Cable should be pinned in default Favorites");
+
+      consoleSurface->selectNav(Group::Mix, 4); // Dugan Automixer
+      expect(!consoleSurface->isCurrentPageFavorite(),
+             "Dugan should not be favorite by default");
+      consoleSurface->toggleCurrentPageFavorite();
+      expect(consoleSurface->isCurrentPageFavorite(),
+             "toggleCurrentPageFavorite must star active page");
+      consoleSurface->toggleCurrentPageFavorite();
+      expect(!consoleSurface->isCurrentPageFavorite(),
+             "toggleCurrentPageFavorite must unstar on second call");
+
+      const auto vcMatches =
+          AndroidHomeLauncherView::findPagesMatching("virtual cable");
+      expect(!vcMatches.empty() && vcMatches[0]->groupIdx == 4 &&
+                 vcMatches[0]->subPage == 2,
+             "Search 'virtual cable' must resolve to System > Virtual Cable");
+
+      const auto iemMatches =
+          AndroidHomeLauncherView::findPagesMatching("iem");
+      expect(!iemMatches.empty(),
+             "Search 'iem' must find Bus/Monitor pages");
+
+      const auto eqMatches =
+          AndroidHomeLauncherView::findPagesMatching("eq");
+      expect(!eqMatches.empty() && eqMatches[0]->groupIdx == 0 &&
+                 eqMatches[0]->subPage == 1,
+             "Search 'eq' must prioritize Mix > Equaliser");
+
+      const auto recMatches =
+          AndroidHomeLauncherView::findPagesMatching("recorder");
+      expect(!recMatches.empty() && recMatches[0]->groupIdx == 3 &&
+                 recMatches[0]->subPage == 1,
+             "Search 'recorder' must resolve to Show > 64-Ch Recorder");
+
+      // Narrow touchscreen collapses main groups into MENU drawer
+      consoleSurface->setSize(960, 720);
+      expect(!consoleSurface->isGroupButtonBarVisible(),
+             "Narrow surface should collapse inline group bar into MENU");
+      consoleSurface->setSize(1920, 1080);
+      expect(consoleSurface->isGroupButtonBarVisible(),
+             "Wide surface restores inline group bar");
 
       // 2. State readout verification across all console parameters
       auto &ch = engine.channels[0];
