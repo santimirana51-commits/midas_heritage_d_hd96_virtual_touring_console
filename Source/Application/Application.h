@@ -45,36 +45,43 @@ public:
       appendStartupLog(
           std::string("deviceManager.initialise(savedXml) result: ") +
           (usedSavedConfig ? "OK" : err.toStdString()));
+      if (usedSavedConfig) {
+        if (auto *dev = deviceManager.getCurrentAudioDevice()) {
+          const auto typeName = deviceManager.getCurrentAudioDeviceType();
+          const bool isAsio = typeName.containsIgnoreCase("ASIO") ||
+                              dev->getTypeName().containsIgnoreCase("ASIO");
+          const double sr = dev->getCurrentSampleRate();
+          const int minSafeWasapi = (sr >= 88200.0) ? 480 : 384;
+          if (!isAsio && dev->getCurrentBufferSizeSamples() < minSafeWasapi) {
+            applyLowLatencyBufferIfSupported();
+          }
+        }
+      }
     }
 
     if (!usedSavedConfig) {
-      // Prefer Windows Audio (Low Latency Mode) on fresh boot / fallback
-      bool hasLowLatency = false;
-      for (auto *t : deviceManager.getAvailableDeviceTypes()) {
-        if (t != nullptr &&
-            t->getTypeName() == "Windows Audio (Low Latency Mode)") {
-          hasLowLatency = true;
-          break;
-        }
-      }
-
-      if (hasLowLatency) {
-        deviceManager.setCurrentAudioDeviceType(
-            "Windows Audio (Low Latency Mode)", true);
-        err = deviceManager.initialiseWithDefaultDevices(2, 2);
-        appendStartupLog(std::string("WASAPI Low Latency Mode init result: ") +
-                         (err.isEmpty() ? "OK" : err.toStdString()));
-      }
-
-      if (!hasLowLatency || err.isNotEmpty() ||
+      // Prefer standard Windows Audio (WASAPI Shared Mode with native ~10ms
+      // period & AUTOCONVERTPCM, per AudioHQ architecture) on fresh boot
+      deviceManager.setCurrentAudioDeviceType("Windows Audio", true);
+      err = deviceManager.initialiseWithDefaultDevices(2, 2);
+      if (err.isNotEmpty() ||
           deviceManager.getCurrentAudioDevice() == nullptr) {
-        deviceManager.setCurrentAudioDeviceType("Windows Audio", true);
-        err = deviceManager.initialiseWithDefaultDevices(2, 2);
-        if (err.isNotEmpty() ||
-            deviceManager.getCurrentAudioDevice() == nullptr)
-          err = deviceManager.initialiseWithDefaultDevices(0, 2);
-        appendStartupLog(std::string("WASAPI Shared fallback init result: ") +
-                         (err.isEmpty() ? "OK" : err.toStdString()));
+        err = deviceManager.initialiseWithDefaultDevices(0, 2);
+      }
+      appendStartupLog(std::string("WASAPI Shared Mode init result: ") +
+                       (err.isEmpty() ? "OK" : err.toStdString()));
+
+      if (err.isNotEmpty() ||
+          deviceManager.getCurrentAudioDevice() == nullptr) {
+        for (auto *t : deviceManager.getAvailableDeviceTypes()) {
+          if (t != nullptr &&
+              t->getTypeName() == "Windows Audio (Low Latency Mode)") {
+            deviceManager.setCurrentAudioDeviceType(
+                "Windows Audio (Low Latency Mode)", true);
+            err = deviceManager.initialiseWithDefaultDevices(2, 2);
+            break;
+          }
+        }
       }
 
       applyLowLatencyBufferIfSupported();

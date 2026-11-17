@@ -53,9 +53,11 @@ public:
 
     /**
      * @brief Open a secondary WASAPI device specifically for Monitor output.
-     * Prefers Windows Audio (Low Latency Mode) with safe fallback to Shared Mode.
+     * Follows UnderFusion/AudioHQ architecture: prefers standard Windows Audio (WASAPI Shared Mode
+     * with native ~10 ms period and AUTOCONVERTPCM) so audiodg.exe does not suffer low-latency
+     * period contention across Master (WASAPI 1) and Monitor (WASAPI 2 / Bluetooth).
      */
-    bool openDevice(const juce::String& outputDeviceName, double targetSampleRate = 0.0, int bufferSize = 256) {
+    bool openDevice(const juce::String& outputDeviceName, double targetSampleRate = 0.0, int bufferSize = 480) {
         closeDevice();
 
         if (deviceManager.getAvailableDeviceTypes().isEmpty()) {
@@ -83,7 +85,7 @@ public:
             setup.useDefaultOutputChannels = true;
             if (targetSampleRate > 1000.0)
                 setup.sampleRate = targetSampleRate;
-            if (bufferSize >= 64)
+            if (bufferSize >= 128)
                 setup.bufferSize = bufferSize;
 
             const auto err = deviceManager.setAudioDeviceSetup(setup, true);
@@ -92,22 +94,29 @@ public:
 
             if (auto* dev = deviceManager.getCurrentAudioDevice()) {
                 const auto sizes = dev->getAvailableBufferSizes();
+                const double sr = (dev->getCurrentSampleRate() > 1000.0) ? dev->getCurrentSampleRate() : 48000.0;
+                const int desiredBuf = (sr >= 88200.0) ? std::max(bufferSize, 960) : std::max(bufferSize, 480);
+                const int minSafe = (sr >= 88200.0) ? 480 : 384;
+                const int maxSafe = (sr >= 88200.0) ? 2048 : 1024;
                 int bestBuf = 0;
-                if (sizes.contains(bufferSize)) {
-                    bestBuf = bufferSize;
+                if (sizes.contains(desiredBuf)) {
+                    bestBuf = desiredBuf;
                 } else {
-                    int bestInRange = 999999;
-                    int smallestAny = 999999;
+                    int bestDist = 999999;
+                    int largestAny = 0;
                     for (int s : sizes) {
-                        if (s >= 192 && s <= 512 && s < bestInRange)
-                            bestInRange = s;
-                        if (s >= 64 && s < smallestAny)
-                            smallestAny = s;
+                        if (s >= minSafe && s <= maxSafe) {
+                            const int dist = std::abs(s - desiredBuf);
+                            if (bestBuf == 0 || dist < bestDist || (dist == bestDist && s > bestBuf)) {
+                                bestBuf = s;
+                                bestDist = dist;
+                            }
+                        }
+                        if (s > largestAny)
+                            largestAny = s;
                     }
-                    if (bestInRange < 999999)
-                        bestBuf = bestInRange;
-                    else if (smallestAny < 999999)
-                        bestBuf = smallestAny;
+                    if (bestBuf == 0)
+                        bestBuf = largestAny;
                 }
                 auto curSetup = deviceManager.getAudioDeviceSetup();
                 if (bestBuf > 0 && curSetup.bufferSize != bestBuf) {
@@ -118,14 +127,16 @@ public:
             return true;
         };
 
-        if (tryOpenWithType("Windows Audio (Low Latency Mode)") ||
-            tryOpenWithType("Windows Audio")) {
+        if (tryOpenWithType("Windows Audio") ||
+            tryOpenWithType("Windows Audio (Low Latency Mode)")) {
+            engine.setMonitorConsumerActive(true);
             deviceManager.addAudioCallback(this);
             deviceActive.store(true, std::memory_order_relaxed);
             activeDeviceName = outputDeviceName;
             return true;
         }
 
+        engine.setMonitorConsumerActive(false);
         activeDeviceName.clear();
         deviceActive.store(false, std::memory_order_relaxed);
         return false;
@@ -138,6 +149,7 @@ public:
         deviceActive.store(false, std::memory_order_relaxed);
         deviceManager.removeAudioCallback(this);
         deviceManager.closeAudioDevice();
+        engine.setMonitorConsumerActive(false);
         activeDeviceName.clear();
     }
 
@@ -172,16 +184,36 @@ public:
     void resetFifoStats() noexcept { engine.resetMonitorFifoStats(); }
 
     // =========================================================================
+    // AudioHQ EngineTunables Constants (UnderFusion/AudioHQ reference)
+    // =========================================================================
+    static constexpr double kTargetBacklogMarginMs = 15.0;     // Trough margin above 1 pull so bursty endpoints never starve
+    static constexpr double kResyncMarginMs = 120.0;           // Hard resync ceiling above target trough for stalls
+    static constexpr double kResamplerMaxCorrection = 0.005;   // +/- 0.5% (~8 cents, inaudible)
+    static constexpr double kResamplerGain = 0.5;              // Proportional gain per second of trough error
+    static constexpr double kResamplerTroughSmoothing = 0.3;   // EMA factor applied to trough each 200 ms control tick
+
+    // =========================================================================
     // juce::AudioIODeviceCallback Implementation
     // =========================================================================
 
     void audioDeviceAboutToStart(juce::AudioIODevice* device) override {
-        engine.resetMonitorFifoStats();
+        engine.setMonitorConsumerActive(true);
+        // Drain any old queued samples from consumer side (thread-safe SPSC without cross-thread reset())
+        const int stale = engine.getMonitorFifoReady();
+        if (stale > 0)
+            engine.discardMonitorSamples(stale);
+        (void)engine.consumeMonitorFifoResetRequest();
+
         wasUnderflowing = false;
         monitorPrimed = false;
+        consecutiveEmptyCallbacks = 0;
         lastOutSampleL = 0.0f;
         lastOutSampleR = 0.0f;
         smoothedSpeedRatio = 1.0;
+        currentCorrection = 0.0;
+        windowMinFillSeconds = 1.0e12;
+        windowFrames = 0;
+        smoothedTroughSeconds = 0.030;
         if (device != nullptr) {
             currentSampleRate = device->getCurrentSampleRate();
             currentBufferSize = device->getCurrentBufferSizeSamples();
@@ -199,11 +231,16 @@ public:
     }
 
     void audioDeviceStopped() override {
+        engine.setMonitorConsumerActive(false);
         wasUnderflowing = false;
         monitorPrimed = false;
+        consecutiveEmptyCallbacks = 0;
         lastOutSampleL = 0.0f;
         lastOutSampleR = 0.0f;
         smoothedSpeedRatio = 1.0;
+        currentCorrection = 0.0;
+        windowMinFillSeconds = 1.0e12;
+        windowFrames = 0;
         interpolatorL.reset();
         interpolatorR.reset();
     }
@@ -235,24 +272,59 @@ public:
         const double nominalSpeedRatio = validEngineSr / secSr;
 
         const int engBuf = std::max(64, engine.blockSize.load(std::memory_order_relaxed));
-        const int minBlock = std::max(engBuf, numSamples);
-        const int defaultTarget = (validEngineSr >= 88200.0) ? 2048 : 1024;
-        const int targetQueue = std::clamp(std::max(minBlock * 3, defaultTarget), 512, 8192);
+        const double engPeriodSec = static_cast<double>(engBuf) / validEngineSr;
+        const double secPeriodSec = static_cast<double>(numSamples) / secSr;
+        const double maxPullPeriodSec = std::max(engPeriodSec, secPeriodSec);
+
+        // AudioHQ Trough Target: keep the MINIMUM backlog (trough) across each 200ms window
+        // safely above 1 full pull + TargetBacklogMarginMs (15ms) so bursty Bluetooth/WASAPI
+        // endpoints never starve at the bottom of the sawtooth.
+        const double targetTroughSeconds = std::clamp(maxPullPeriodSec + (kTargetBacklogMarginMs * 0.001), 0.025, 0.065);
+        const double prefillTargetSeconds = targetTroughSeconds + maxPullPeriodSec;
+        const double maxBacklogSeconds = prefillTargetSeconds + (kResyncMarginMs * 0.001);
 
         int queuedSamples = engine.getMonitorFifoReady();
         bool trimmedOverflow = false;
 
-        // Emergency drain when backlog exceeds 3x targetQueue: discard excess without resetting Lagrange history
-        if (queuedSamples > targetQueue * 3) {
-            const int discarded = engine.discardMonitorSamples(queuedSamples - targetQueue);
-            queuedSamples = engine.getMonitorFifoReady();
-            trimmedOverflow = (discarded > 0);
+        // Handle explicit UI / producer reset requests on the consumer thread safely
+        if (engine.consumeMonitorFifoResetRequest()) {
+            const int targetKeep = static_cast<int>(std::ceil(prefillTargetSeconds * validEngineSr));
+            if (queuedSamples > targetKeep) {
+                engine.discardMonitorSamples(queuedSamples - targetKeep);
+                queuedSamples = engine.getMonitorFifoReady();
+                trimmedOverflow = true;
+            }
+            smoothedTroughSeconds = targetTroughSeconds;
+            windowMinFillSeconds = 1.0e12;
+            windowFrames = 0;
+            currentCorrection = 0.0;
         }
 
-        // Pre-fill watermark: wait until FIFO reaches targetQueue before pulling audio
+        const double fillSeconds = static_cast<double>(queuedSamples) / validEngineSr;
+
+        // Safety-net backlog resync (AudioHQ OutputChannel.Write _maxBacklog check):
+        // Only fires if a true device stall pushed backlog past maxBacklogSeconds (~165 ms).
+        if (fillSeconds > maxBacklogSeconds) {
+            const int targetKeep = static_cast<int>(std::ceil(prefillTargetSeconds * validEngineSr));
+            if (queuedSamples > targetKeep) {
+                const int discarded = engine.discardMonitorSamples(queuedSamples - targetKeep);
+                queuedSamples = engine.getMonitorFifoReady();
+                trimmedOverflow = (discarded > 0);
+            }
+            smoothedTroughSeconds = targetTroughSeconds;
+            windowMinFillSeconds = static_cast<double>(queuedSamples) / validEngineSr;
+            windowFrames = 0;
+        }
+
+        // Pre-fill watermark on initial start or after complete stream stop
         if (!monitorPrimed) {
             smoothedSpeedRatio = nominalSpeedRatio;
-            if (queuedSamples < targetQueue) {
+            currentCorrection = 0.0;
+            smoothedTroughSeconds = targetTroughSeconds;
+            windowMinFillSeconds = 1.0e12;
+            windowFrames = 0;
+            const int prefillSamples = static_cast<int>(std::ceil(prefillTargetSeconds * validEngineSr));
+            if (queuedSamples < prefillSamples) {
                 for (int i = 0; i < numSamples; ++i) {
                     lastOutSampleL *= 0.92f;
                     lastOutSampleR *= 0.92f;
@@ -265,21 +337,33 @@ public:
             }
             monitorPrimed = true;
             wasUnderflowing = true;
+            consecutiveEmptyCallbacks = 0;
         }
 
-        // Elastic drift compensation + one-pole smoothing to prevent ASRC pitch wobble across async WASAPI threads
-        double driftAdjust = 0.0;
-        const int diff = queuedSamples - targetQueue;
-        if (diff > 24) {
-            driftAdjust = std::min(0.004, (diff - 24) * 0.000015);
-        } else if (diff < -24) {
-            driftAdjust = -std::min(0.004, (-diff - 24) * 0.000015);
+        // Track minimum backlog ("trough") across the 200 ms control window (AudioHQ AdaptiveResampler)
+        const double currentFillSec = static_cast<double>(queuedSamples) / validEngineSr;
+        if (currentFillSec < windowMinFillSeconds)
+            windowMinFillSeconds = currentFillSec;
+
+        windowFrames += numSamples;
+        const long controlFrames = std::max<long>(1, static_cast<long>(secSr / 5.0)); // ~5 ticks/sec (200 ms)
+        if (windowFrames >= controlFrames) {
+            if (windowMinFillSeconds < 1.0e9) {
+                smoothedTroughSeconds += kResamplerTroughSmoothing * (windowMinFillSeconds - smoothedTroughSeconds);
+                const double errorSeconds = smoothedTroughSeconds - targetTroughSeconds;
+                currentCorrection = std::clamp(errorSeconds * kResamplerGain,
+                                               -kResamplerMaxCorrection,
+                                               kResamplerMaxCorrection);
+            }
+            windowMinFillSeconds = 1.0e12;
+            windowFrames = 0;
         }
-        const double rawRatio = nominalSpeedRatio * (1.0 + driftAdjust);
+
+        const double targetRatio = nominalSpeedRatio * (1.0 + currentCorrection);
         if (std::abs(nominalSpeedRatio - smoothedSpeedRatio) > 0.05) {
-            smoothedSpeedRatio = rawRatio;
+            smoothedSpeedRatio = targetRatio;
         } else {
-            smoothedSpeedRatio += 0.02 * (rawRatio - smoothedSpeedRatio);
+            smoothedSpeedRatio += 0.05 * (targetRatio - smoothedSpeedRatio);
         }
         const double speedRatio = std::clamp(smoothedSpeedRatio, 0.25, 4.0);
 
@@ -298,6 +382,7 @@ public:
         }
 
         if (available >= neededEngineSamples && safeNeeded >= neededEngineSamples) {
+            consecutiveEmptyCallbacks = 0;
             const int usedL = interpolatorL.process(speedRatio, readBufferL.data(), dstL, numSamples);
             const int usedR = interpolatorR.process(speedRatio, readBufferR.data(), dstR, numSamples);
             const int consumed = std::min(usedL, usedR);
@@ -322,43 +407,33 @@ public:
             lastOutSampleL = dstL[numSamples - 1];
             lastOutSampleR = dstR[numSamples - 1];
         } else if (available > 0) {
-            // Partial underrun: clamp interpolated output count strictly inside `available`
-            // so we never read stale history beyond readBuffer[available - 1], then decay exponentially.
+            // Transient low trough: pad readBuffer[available..safeNeeded-1] with smooth decay
+            // from the last available sample and continue continuous resampling without unpriming!
+            consecutiveEmptyCallbacks = 0;
             engine.recordMonitorUnderrun();
-            monitorPrimed = false;
-            wasUnderflowing = true;
-
-            const int validOutSamples = std::clamp(
-                static_cast<int>(std::floor(static_cast<double>(available - 1) / speedRatio)),
-                0, numSamples);
-            if (validOutSamples > 0) {
-                const int partL = interpolatorL.process(speedRatio, readBufferL.data(), dstL, validOutSamples, available, 0);
-                const int partR = interpolatorR.process(speedRatio, readBufferR.data(), dstR, validOutSamples, available, 0);
-                engine.advanceMonitorRead(std::min(available, std::min(partL, partR)));
-                if (trimmedOverflow) {
-                    const int xfadeLen = std::min(32, validOutSamples);
-                    for (int i = 0; i < xfadeLen; ++i) {
-                        const float alpha = static_cast<float>(i + 1) / static_cast<float>(xfadeLen);
-                        if (outL != nullptr) outL[i] = lastOutSampleL * (1.0f - alpha) + outL[i] * alpha;
-                        if (outR != nullptr) outR[i] = lastOutSampleR * (1.0f - alpha) + outR[i] * alpha;
-                    }
-                }
-                lastOutSampleL = dstL[validOutSamples - 1];
-                lastOutSampleR = dstR[validOutSamples - 1];
+            windowMinFillSeconds = 0.0;
+            float holdL = readBufferL[static_cast<size_t>(available - 1)];
+            float holdR = readBufferR[static_cast<size_t>(available - 1)];
+            for (int i = available; i < safeNeeded; ++i) {
+                holdL *= 0.96f;
+                holdR *= 0.96f;
+                readBufferL[static_cast<size_t>(i)] = holdL;
+                readBufferR[static_cast<size_t>(i)] = holdR;
             }
-            for (int i = validOutSamples; i < numSamples; ++i) {
-                lastOutSampleL *= 0.92f;
-                lastOutSampleR *= 0.92f;
-                if (outL != nullptr) outL[i] = lastOutSampleL;
-                if (outR != nullptr) outR[i] = lastOutSampleR;
-            }
-            if (std::abs(lastOutSampleL) < 1.0e-7f) lastOutSampleL = 0.0f;
-            if (std::abs(lastOutSampleR) < 1.0e-7f) lastOutSampleR = 0.0f;
+            const int usedL = interpolatorL.process(speedRatio, readBufferL.data(), dstL, numSamples, safeNeeded, 0);
+            const int usedR = interpolatorR.process(speedRatio, readBufferR.data(), dstR, numSamples, safeNeeded, 0);
+            engine.advanceMonitorRead(std::min(available, std::min(usedL, usedR)));
+            lastOutSampleL = dstL[numSamples - 1];
+            lastOutSampleR = dstR[numSamples - 1];
         } else {
-            // Full underrun: trigger smooth exponential sample-hold decay and wait for watermark refill
+            // FIFO completely empty: decay smoothly; only re-enter prefill if empty for 3+ callbacks
             engine.recordMonitorUnderrun();
-            monitorPrimed = false;
-            wasUnderflowing = true;
+            windowMinFillSeconds = 0.0;
+            ++consecutiveEmptyCallbacks;
+            if (consecutiveEmptyCallbacks >= 3) {
+                monitorPrimed = false;
+                wasUnderflowing = true;
+            }
             for (int i = 0; i < numSamples; ++i) {
                 lastOutSampleL *= 0.92f;
                 lastOutSampleR *= 0.92f;
@@ -378,10 +453,15 @@ private:
     juce::String activeDeviceName;
 
     double currentSampleRate{48000.0};
-    int currentBufferSize{256};
+    int currentBufferSize{480};
     bool wasUnderflowing{false};
     bool monitorPrimed{false};
+    int consecutiveEmptyCallbacks{0};
     double smoothedSpeedRatio{1.0};
+    double currentCorrection{0.0};
+    double windowMinFillSeconds{1.0e12};
+    long windowFrames{0};
+    double smoothedTroughSeconds{0.030};
     float lastOutSampleL{0.0f};
     float lastOutSampleR{0.0f};
 

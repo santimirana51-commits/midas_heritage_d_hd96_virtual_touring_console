@@ -75,6 +75,8 @@ public:
 
     void prepare(double sampleRate) noexcept {
         const double sr = std::clamp(sampleRate, 1000.0, 768000.0);
+        const bool srChanged = (std::abs(sr - cachedSr) > 0.5);
+        cachedSr = sr;
         for (size_t band = 0; band < kBands; ++band) {
             const double frequency = std::clamp(
                 static_cast<double>(frequencyHz[band].load(
@@ -87,10 +89,17 @@ public:
             const double quality = std::clamp(
                 static_cast<double>(q[band].load(std::memory_order_relaxed)),
                 0.1, 10.0);
-            filtersLeft[band].setCoefficients(
-                makePeakingEq(sr, frequency, gain, quality));
-            filtersRight[band].setCoefficients(
-                makePeakingEq(sr, frequency, gain, quality));
+            if (srChanged ||
+                std::abs(frequency - cachedFreq[band]) > 1.0e-3 ||
+                std::abs(gain - cachedGain[band]) > 1.0e-3 ||
+                std::abs(quality - cachedQ[band]) > 1.0e-3) {
+                cachedFreq[band] = frequency;
+                cachedGain[band] = gain;
+                cachedQ[band] = quality;
+                const auto coeffs = makePeakingEq(sr, frequency, gain, quality);
+                filtersLeft[band].setCoefficients(coeffs);
+                filtersRight[band].setCoefficients(coeffs);
+            }
         }
     }
 
@@ -115,6 +124,10 @@ public:
     std::array<std::atomic<bool>, kBands> enabled{};
 
 private:
+    double cachedSr = 0.0;
+    std::array<double, kBands> cachedFreq{};
+    std::array<double, kBands> cachedGain{};
+    std::array<double, kBands> cachedQ{};
     std::array<Biquad, kBands> filtersLeft{};
     std::array<Biquad, kBands> filtersRight{};
 };

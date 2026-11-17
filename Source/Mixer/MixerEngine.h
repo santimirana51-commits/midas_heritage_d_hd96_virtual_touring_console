@@ -307,6 +307,8 @@ public:
   // Audio-thread-only gain smoothing state (linear gain); initialized to unity.
   std::array<double, kLogicalChannels> channelGainSmooth{};
   double masterGainSmooth = 1.0;
+  double monitorGainSmoothA = 1.0;
+  double monitorGainSmoothB = 1.0;
   std::array<double, kAuxBusCapacity> auxMasterGainSmooth{};
   std::array<double, kMatrixBusCapacity> matrixMasterGainSmooth{};
   std::array<std::atomic<float>, 24> vcaMasterDb{};
@@ -399,16 +401,26 @@ public:
       false}; // When true, physical outputs 2 & 3 carry Monitor L/R
 
   // Lock-free FIFO for Secondary Audio Streamer (WASAPI 2 / Bluetooth)
-  static constexpr int kMonitorFifoCapacity = 65536;
+  // Sized to 2 seconds @ 96 kHz (4 seconds @ 48 kHz) per AudioHQ EngineTunables::BufferSeconds = 2
+  static constexpr int kMonitorFifoCapacity = 192000;
   juce::AbstractFifo monitorFifo{kMonitorFifoCapacity};
   std::vector<float> monitorFifoL;
   std::vector<float> monitorFifoR;
+  std::atomic<bool> monitorConsumerActive{false};
+  std::atomic<bool> monitorFifoResetRequested{false};
 
   // Monitor FIFO Real-Time Queue Depth & Overrun/Underrun Telemetry
   std::atomic<int> monitorFifoQueueDepth{0};
   std::atomic<float> monitorFifoLatencyMs{0.0f};
   std::atomic<uint32_t> monitorFifoOverruns{0};
   std::atomic<uint32_t> monitorFifoUnderruns{0};
+
+  void setMonitorConsumerActive(bool active) noexcept {
+    monitorConsumerActive.store(active, std::memory_order_release);
+  }
+  bool isMonitorConsumerActive() const noexcept {
+    return monitorConsumerActive.load(std::memory_order_acquire);
+  }
 
   int getMonitorFifoQueueDepth() const noexcept {
     return monitorFifoQueueDepth.load(std::memory_order_relaxed);
@@ -426,11 +438,19 @@ public:
     return monitorFifoUnderruns.load(std::memory_order_relaxed);
   }
   void resetMonitorFifoStats() noexcept {
-    monitorFifo.reset();
+    if (!running.load(std::memory_order_relaxed) &&
+        !monitorConsumerActive.load(std::memory_order_relaxed)) {
+      monitorFifo.reset();
+    } else {
+      monitorFifoResetRequested.store(true, std::memory_order_release);
+    }
     monitorFifoOverruns.store(0, std::memory_order_relaxed);
     monitorFifoUnderruns.store(0, std::memory_order_relaxed);
     monitorFifoQueueDepth.store(0, std::memory_order_relaxed);
     monitorFifoLatencyMs.store(0.0f, std::memory_order_relaxed);
+  }
+  bool consumeMonitorFifoResetRequest() noexcept {
+    return monitorFifoResetRequested.exchange(false, std::memory_order_acq_rel);
   }
 
   double getSampleRate() const noexcept {
@@ -1140,9 +1160,15 @@ public:
     lastDeviceError.clear();
     deviceStartCount.fetch_add(1, std::memory_order_relaxed);
     sampleRate.store(device->getCurrentSampleRate());
-    monitorFifoL.assign(static_cast<size_t>(kMonitorFifoCapacity), 0.0f);
-    monitorFifoR.assign(static_cast<size_t>(kMonitorFifoCapacity), 0.0f);
-    monitorFifo.reset();
+    if (monitorFifoL.size() < static_cast<size_t>(kMonitorFifoCapacity)) {
+      monitorFifoL.assign(static_cast<size_t>(kMonitorFifoCapacity), 0.0f);
+      monitorFifoR.assign(static_cast<size_t>(kMonitorFifoCapacity), 0.0f);
+    }
+    if (!monitorConsumerActive.load(std::memory_order_acquire)) {
+      monitorFifo.reset();
+    } else {
+      monitorFifoResetRequested.store(true, std::memory_order_release);
+    }
     monitorEq.prepare(device->getCurrentSampleRate());
     effectsRack.setSampleRate(device->getCurrentSampleRate());
     duganAutomixer.setSampleRate(device->getCurrentSampleRate());
@@ -1963,6 +1989,12 @@ public:
             masterBusEqHighGainDb.load(std::memory_order_relaxed)));
     masterBusChain.setDitherEnabled(
         masterBusDitherEnabled.load(std::memory_order_relaxed));
+    monitorEq.prepare(sr);
+    const bool monEqBypassBlock =
+        monitorEqBypass.load(std::memory_order_relaxed);
+    const float fxMonGainBlock = nova::graviton::dbToGain(
+        fxToMonitorDb.load(std::memory_order_relaxed));
+    const float monDelMsBlock = monitorDelayMs.load(std::memory_order_relaxed);
 
     std::array<double, 12> sampleSurroundOutputs{};
     std::array<double, kAuxBusCapacity> auxSums{};
@@ -2654,11 +2686,9 @@ public:
       const double monSigR_B = anySoloB ? soloSumR_B : monMixR;
 
       // Independent FX Send / Return to Monitor Bus:
-      const float fxMonGain = nova::graviton::dbToGain(
-          fxToMonitorDb.load(std::memory_order_relaxed));
-      if (fxMonGain > 0.0001f) {
-        monSigL_A += totalFxReturnL * fxMonGain;
-        monSigR_A += totalFxReturnR * fxMonGain;
+      if (fxMonGainBlock > 0.0001f) {
+        monSigL_A += totalFxReturnL * fxMonGainBlock;
+        monSigR_A += totalFxReturnR * fxMonGainBlock;
       }
       if (oscSample != 0.0 && oscRouteMonitor.load(std::memory_order_relaxed)) {
         monSigL_A += oscSample;
@@ -2671,19 +2701,18 @@ public:
       double finalMonR_B = monSigR_B * effectiveMonGainB;
 
       // Independent Monitor 4-Band Parametric EQ:
-      if (!monitorEqBypass.load(std::memory_order_relaxed)) {
+      if (!monEqBypassBlock) {
         monitorEq.process(finalMonL_A, finalMonR_A);
       }
       finalMonL_A = nova::graviton::sanitize(finalMonL_A);
       finalMonR_A = nova::graviton::sanitize(finalMonR_A);
 
       // Monitor Output Delay Line (Time Alignment)
-      const float monDelMs = monitorDelayMs.load(std::memory_order_relaxed);
-      if (monDelMs > 0.001f && !monitorDelayBufL.empty()) {
+      if (monDelMsBlock > 0.001f && !monitorDelayBufL.empty()) {
         const int delSamp =
             juce::jlimit(0, kMaxDelaySamples - 1,
                          static_cast<int>(std::round(
-                             static_cast<double>(monDelMs) * 0.001 * sr)));
+                             static_cast<double>(monDelMsBlock) * 0.001 * sr)));
         monitorDelayBufL[static_cast<size_t>(monitorDelayWritePos)] =
             finalMonL_A;
         monitorDelayBufR[static_cast<size_t>(monitorDelayWritePos)] =
@@ -2695,20 +2724,6 @@ public:
         finalMonR_A = monitorDelayBufR[static_cast<size_t>(readPos)];
         monitorDelayWritePos = (monitorDelayWritePos + 1) % kMaxDelaySamples;
       }
-
-      if (static_cast<size_t>(s) < blockMonBufL.size()) {
-        blockMonBufL[static_cast<size_t>(s)] = static_cast<float>(finalMonL_A);
-        blockMonBufR[static_cast<size_t>(s)] = static_cast<float>(finalMonR_A);
-      }
-
-      blockMonPeakL_A =
-          std::max(blockMonPeakL_A, static_cast<float>(std::abs(finalMonL_A)));
-      blockMonPeakR_A =
-          std::max(blockMonPeakR_A, static_cast<float>(std::abs(finalMonR_A)));
-      blockMonPeakL_B =
-          std::max(blockMonPeakL_B, static_cast<float>(std::abs(finalMonL_B)));
-      blockMonPeakR_B =
-          std::max(blockMonPeakR_B, static_cast<float>(std::abs(finalMonR_B)));
       // Matrix masters are smoothed once per sample. The Matrix calculation
       // itself consumes double Main/AUX samples and only narrows at the
       // existing output boundary.
@@ -2829,6 +2844,27 @@ public:
         finalMonL_A = nova::graviton::sanitize(finalMonL_A + binSurroundL);
         finalMonR_A = nova::graviton::sanitize(finalMonR_A + binSurroundR);
       }
+
+      finalMonL_A = std::clamp(nova::graviton::sanitize(finalMonL_A), -1.0, 1.0);
+      finalMonR_A = std::clamp(nova::graviton::sanitize(finalMonR_A), -1.0, 1.0);
+      finalMonL_B = std::clamp(nova::graviton::sanitize(finalMonL_B), -1.0, 1.0);
+      finalMonR_B = std::clamp(nova::graviton::sanitize(finalMonR_B), -1.0, 1.0);
+
+      if (static_cast<size_t>(s) < blockMonBufL.size()) {
+        blockMonBufL[static_cast<size_t>(s)] =
+            nova::graviton::toFloatBoundary(finalMonL_A);
+        blockMonBufR[static_cast<size_t>(s)] =
+            nova::graviton::toFloatBoundary(finalMonR_A);
+      }
+
+      blockMonPeakL_A =
+          std::max(blockMonPeakL_A, static_cast<float>(std::abs(finalMonL_A)));
+      blockMonPeakR_A =
+          std::max(blockMonPeakR_A, static_cast<float>(std::abs(finalMonR_A)));
+      blockMonPeakL_B =
+          std::max(blockMonPeakL_B, static_cast<float>(std::abs(finalMonL_B)));
+      blockMonPeakR_B =
+          std::max(blockMonPeakR_B, static_cast<float>(std::abs(finalMonR_B)));
 
       // Device callback, router, recorder and meters remain float-based.
       const float mainOutL = nova::graviton::toFloatBoundary(left);
@@ -3065,10 +3101,24 @@ public:
     // Streamer (WASAPI 2 / Bluetooth)
     const int monSamples =
         std::min(numSamples, static_cast<int>(blockMonBufL.size()));
+    const bool monConsumerLive =
+        monitorConsumerActive.load(std::memory_order_acquire);
+    if (!monConsumerLive && monitorFifo.getFreeSpace() < monSamples) {
+      // No active WASAPI 2 consumer: keep only recent samples in FIFO without
+      // counting false overruns or stalling when WASAPI 2 later connects.
+      const int readyNow = monitorFifo.getNumReady();
+      const int keepMax = 4096;
+      if (readyNow > keepMax) {
+        int rStart1 = 0, rSize1 = 0, rStart2 = 0, rSize2 = 0;
+        monitorFifo.prepareToRead(readyNow - keepMax, rStart1, rSize1, rStart2,
+                                  rSize2);
+        monitorFifo.finishedRead(rSize1 + rSize2);
+      }
+    }
     int monStart1 = 0, monSize1 = 0, monStart2 = 0, monSize2 = 0;
     monitorFifo.prepareToWrite(monSamples, monStart1, monSize1, monStart2,
                                monSize2);
-    if (monSize1 + monSize2 < monSamples) {
+    if (monConsumerLive && (monSize1 + monSize2 < monSamples)) {
       monitorFifoOverruns.fetch_add(1, std::memory_order_relaxed);
     }
     if (monSize1 > 0) {
