@@ -1215,6 +1215,15 @@ public:
     return out;
   }
 
+  static int findCatalogIndex(int origGroupIdx, int subPage) {
+    const auto &cat = getCatalog();
+    for (size_t i = 0; i < cat.size(); ++i) {
+      if (cat[i].groupIdx == origGroupIdx && cat[i].subPage == subPage)
+        return static_cast<int>(i);
+    }
+    return -1;
+  }
+
   AndroidHomeLauncherView() {
     setOpaque(false);
 
@@ -1232,6 +1241,7 @@ public:
     searchBox.onTextChange = [this] {
       hoveredKind = -1;
       hoveredIndex = -1;
+      clearDragState();
       clearSearchBtn.setVisible(searchBox.getText().isNotEmpty());
       repaint();
     };
@@ -1250,10 +1260,24 @@ public:
                              juce::Colours::white);
     clearSearchBtn.onClick = [this] { clearSearch(); };
     addChildComponent(clearSearchBtn);
+
+    resetLayoutBtn.setButtonText("RESET POSISI");
+    resetLayoutBtn.setTooltip(
+        "Kembalikan posisi semua modul dan urutan kolom ke standar");
+    resetLayoutBtn.setColour(juce::TextButton::buttonColourId,
+                             juce::Colour(0xff1e293b));
+    resetLayoutBtn.setColour(juce::TextButton::textColourOffId,
+                             juce::Colour(0xff94a3b8));
+    resetLayoutBtn.onClick = [this] { resetLayoutToDefault(true); };
+    addAndMakeVisible(resetLayoutBtn);
+
+    loadLayoutFromDisk();
   }
 
   std::function<void(int groupIdx, int subPage)> onPageSelected;
   std::function<void(int appIdx)> onAppSelected;
+  std::function<void(int groupIdx, int subPage)> onToggleFavorite;
+  std::function<void()> onLayoutChanged;
 
   void setActivePage(int groupIdx, int subPage) {
     activeGroupIdx = groupIdx;
@@ -1279,10 +1303,125 @@ public:
       searchBox.grabKeyboardFocus();
   }
 
+  void resetLayoutToDefault(bool save = true) {
+    columnOrder = {0, 1, 2, 3, 4};
+    for (auto &vec : columnItems)
+      vec.clear();
+    const auto &cat = getCatalog();
+    for (size_t i = 0; i < cat.size(); ++i) {
+      const int g = juce::jlimit(0, 4, cat[i].groupIdx);
+      columnItems[static_cast<size_t>(g)].push_back(static_cast<int>(i));
+    }
+    clearDragState();
+    if (save)
+      saveLayoutToDisk();
+    updateResetButtonAppearance();
+    if (onLayoutChanged)
+      onLayoutChanged();
+    repaint();
+  }
+
+  bool moveCatalogItem(int catalogIdx, int targetGroupIdx, int targetRowIdx,
+                       bool save = true) {
+    const auto &cat = getCatalog();
+    if (catalogIdx < 0 || catalogIdx >= static_cast<int>(cat.size()) ||
+        targetGroupIdx < 0 || targetGroupIdx >= 5)
+      return false;
+
+    int srcGrp = -1;
+    int srcRow = -1;
+    for (int g = 0; g < 5; ++g) {
+      const auto &vec = columnItems[static_cast<size_t>(g)];
+      for (size_t r = 0; r < vec.size(); ++r) {
+        if (vec[r] == catalogIdx) {
+          srcGrp = g;
+          srcRow = static_cast<int>(r);
+          break;
+        }
+      }
+      if (srcGrp >= 0)
+        break;
+    }
+
+    if (srcGrp >= 0 && srcRow >= 0) {
+      auto &srcVec = columnItems[static_cast<size_t>(srcGrp)];
+      srcVec.erase(srcVec.begin() + srcRow);
+      if (srcGrp == targetGroupIdx && srcRow < targetRowIdx)
+        --targetRowIdx;
+    }
+
+    auto &dstVec = columnItems[static_cast<size_t>(targetGroupIdx)];
+    const int clampedRow =
+        juce::jlimit(0, static_cast<int>(dstVec.size()), targetRowIdx);
+    dstVec.insert(dstVec.begin() + clampedRow, catalogIdx);
+
+    if (save)
+      saveLayoutToDisk();
+    updateResetButtonAppearance();
+    if (onLayoutChanged)
+      onLayoutChanged();
+    repaint();
+    return true;
+  }
+
+  bool swapVisualColumns(int visColA, int visColB, bool save = true) {
+    if (visColA < 0 || visColA >= 5 || visColB < 0 || visColB >= 5)
+      return false;
+    std::swap(columnOrder[static_cast<size_t>(visColA)],
+              columnOrder[static_cast<size_t>(visColB)]);
+    if (save)
+      saveLayoutToDisk();
+    updateResetButtonAppearance();
+    if (onLayoutChanged)
+      onLayoutChanged();
+    repaint();
+    return true;
+  }
+
+  int getAssignedGroupForCatalogIndex(int catalogIdx) const {
+    for (int g = 0; g < 5; ++g) {
+      for (int idx : columnItems[static_cast<size_t>(g)]) {
+        if (idx == catalogIdx)
+          return g;
+      }
+    }
+    const auto &cat = getCatalog();
+    if (catalogIdx >= 0 && catalogIdx < static_cast<int>(cat.size()))
+      return cat[static_cast<size_t>(catalogIdx)].groupIdx;
+    return -1;
+  }
+
+  int getAssignedGroupForPage(int origGroupIdx, int subPage) const {
+    const int idx = findCatalogIndex(origGroupIdx, subPage);
+    if (idx < 0)
+      return -1;
+    return getAssignedGroupForCatalogIndex(idx);
+  }
+
+  const std::vector<int> &getItemsInGroup(int groupIdx) const {
+    return columnItems[static_cast<size_t>(juce::jlimit(0, 4, groupIdx))];
+  }
+
+  const std::array<int, 5> &getColumnOrder() const { return columnOrder; }
+
+  bool isDefaultLayout() const {
+    if (columnOrder != std::array<int, 5>{0, 1, 2, 3, 4})
+      return false;
+    const auto &cat = getCatalog();
+    std::array<std::vector<int>, 5> expected;
+    for (size_t i = 0; i < cat.size(); ++i) {
+      expected[static_cast<size_t>(juce::jlimit(0, 4, cat[i].groupIdx))]
+          .push_back(static_cast<int>(i));
+    }
+    return columnItems == expected;
+  }
+
   void resized() override {
     auto inner = getLocalBounds().reduced(12, 8);
     auto hdr = inner.removeFromTop(26);
-    hdr.removeFromLeft(195); // Room for HOME DIRECTORY title
+    hdr.removeFromLeft(195); // Room for CONSOLE DIRECTORY title
+    resetLayoutBtn.setBounds(hdr.removeFromRight(92).reduced(2, 1));
+    hdr.removeFromRight(4);
     if (clearSearchBtn.isVisible())
       clearSearchBtn.setBounds(hdr.removeFromRight(26).reduced(1));
     else
@@ -1291,6 +1430,8 @@ public:
   }
 
   void mouseMove(const juce::MouseEvent &e) override {
+    if (isDraggingItem || isDraggingColumn)
+      return;
     const auto hit = hitTest(e.position);
     if (hit.first != hoveredKind || hit.second != hoveredIndex) {
       hoveredKind = hit.first;
@@ -1300,6 +1441,8 @@ public:
   }
 
   void mouseExit(const juce::MouseEvent &) override {
+    if (isDraggingItem || isDraggingColumn)
+      return;
     if (hoveredKind != -1 || hoveredIndex != -1) {
       hoveredKind = -1;
       hoveredIndex = -1;
@@ -1307,7 +1450,93 @@ public:
     }
   }
 
+  void mouseDown(const juce::MouseEvent &e) override {
+    mouseDownPos = e.position;
+    currentDragPos = e.position;
+    clearDragState();
+
+    const auto hit = hitTest(e.position);
+    if (searchBox.getText().trim().isNotEmpty()) {
+      pressedKind = hit.first;
+      pressedIndex = hit.second;
+      return;
+    }
+
+    if (e.mods.isPopupMenu()) {
+      showContextMenu(hit, e);
+      return;
+    }
+
+    pressedKind = hit.first;
+    pressedIndex = hit.second;
+  }
+
+  void mouseDrag(const juce::MouseEvent &e) override {
+    if (searchBox.getText().trim().isNotEmpty())
+      return;
+    if (pressedKind != 3 && pressedKind != 4)
+      return;
+
+    currentDragPos = e.position;
+    if (!isDraggingItem && !isDraggingColumn) {
+      if (mouseDownPos.getDistanceFrom(e.position) <= 6.0f)
+        return;
+
+      if (pressedKind == 3) {
+        isDraggingItem = true;
+        dragCatalogIdx = pressedIndex;
+      } else if (pressedKind == 4) {
+        for (int vc = 0; vc < 5; ++vc) {
+          if (columnOrder[static_cast<size_t>(vc)] == pressedIndex) {
+            isDraggingColumn = true;
+            dragSourceVisCol = vc;
+            dragTargetVisCol = vc;
+            break;
+          }
+        }
+      }
+    }
+
+    if (isDraggingItem) {
+      const auto drop = computeItemDropTarget(e.position);
+      dragTargetGroup = drop.first;
+      dragTargetRow = drop.second;
+      repaint();
+    } else if (isDraggingColumn) {
+      dragTargetVisCol = computeClosestVisCol(e.position.x);
+      repaint();
+    }
+  }
+
   void mouseUp(const juce::MouseEvent &e) override {
+    if (isDraggingItem) {
+      const int itemIdx = dragCatalogIdx;
+      const int dstGrp = dragTargetGroup;
+      const int dstRow = dragTargetRow;
+      clearDragState();
+      if (itemIdx >= 0 && dstGrp >= 0)
+        moveCatalogItem(itemIdx, dstGrp, dstRow, true);
+      else
+        repaint();
+      return;
+    }
+
+    if (isDraggingColumn) {
+      const int srcVc = dragSourceVisCol;
+      const int dstVc = dragTargetVisCol;
+      clearDragState();
+      if (srcVc >= 0 && dstVc >= 0 && srcVc != dstVc)
+        swapVisualColumns(srcVc, dstVc, true);
+      else
+        repaint();
+      return;
+    }
+
+    clearDragState();
+
+    if (e.mods.isPopupMenu())
+      return;
+
     const auto hit = hitTest(e.position);
     if (hit.first == 1) { // Search result
       const auto matches = findPagesMatching(searchBox.getText());
@@ -1323,9 +1552,19 @@ public:
         onPageSelected(cat[static_cast<size_t>(hit.second)].groupIdx,
                        cat[static_cast<size_t>(hit.second)].subPage);
       }
-    } else if (hit.first == 4) { // Category header (subPage 0)
-      if (hit.second >= 0 && hit.second < 5 && onPageSelected)
-        onPageSelected(hit.second, 0);
+    } else if (hit.first == 4) { // Category header (opens first item in column)
+      const int grp = juce::jlimit(0, 4, hit.second);
+      const auto &items = columnItems[static_cast<size_t>(grp)];
+      const auto &cat = getCatalog();
+      if (!items.empty() && onPageSelected) {
+        const int idx = items.front();
+        if (idx >= 0 && idx < static_cast<int>(cat.size())) {
+          onPageSelected(cat[static_cast<size_t>(idx)].groupIdx,
+                         cat[static_cast<size_t>(idx)].subPage);
+        }
+      } else if (onPageSelected) {
+        onPageSelected(grp, 0);
+      }
     }
   }
 
@@ -1351,101 +1590,500 @@ public:
       return;
     }
 
-    // Complete 5-Category Directory (no duplicate shortcut row; starred items
-    // show a gold * badge in-place)
-    static const char *catNames[5] = {"1. MIX", "2. ROUTING", "3. FX",
-                                      "4. SHOW", "5. SYSTEM"};
+    static const char *catBaseNames[5] = {"MIX", "ROUTING", "FX", "SHOW",
+                                          "SYSTEM"};
     static const juce::uint32 catCols[5] = {0xff38bdf8, 0xff10b981, 0xfff59e0b,
                                             0xffa855f7, 0xff0ea5e9};
-    const float colGap = 7.0f;
-    const float colW = (inner.getWidth() - colGap * 4.0f) / 5.0f;
     const auto &cat = getCatalog();
 
-    for (int grp = 0; grp < 5; ++grp) {
-      auto colRect = juce::Rectangle<float>(
-          inner.getX() + static_cast<float>(grp) * (colW + colGap),
-          inner.getY(), colW, inner.getHeight());
+    for (int visCol = 0; visCol < 5; ++visCol) {
+      const auto m = getColumnMetrics(visCol);
+      const int grp = m.grp;
       const juce::Colour accent(catCols[grp]);
+      const bool isDropCol =
+          (isDraggingItem && dragTargetGroup == grp) ||
+          (isDraggingColumn && dragTargetVisCol == visCol);
+      const bool isDraggedCol =
+          (isDraggingColumn && dragSourceVisCol == visCol);
 
-      g.setColour(juce::Colour(0xff0f1726));
-      g.fillRoundedRectangle(colRect, 8.0f);
-      g.setColour(accent.withAlpha(0.30f));
-      g.drawRoundedRectangle(colRect, 8.0f, 1.0f);
+      g.setColour(isDropCol ? juce::Colour(0xff132036)
+                            : juce::Colour(0xff0f1726));
+      g.fillRoundedRectangle(m.colRect, 8.0f);
+      g.setColour(isDropCol ? midas_colors::kAccentCyan
+                            : (isDraggedCol ? accent.withAlpha(0.18f)
+                                            : accent.withAlpha(0.30f)));
+      g.drawRoundedRectangle(m.colRect, 8.0f, isDropCol ? 2.0f : 1.0f);
 
-      auto colIn = colRect.reduced(6.0f, 6.0f);
-      auto colHdr = colIn.removeFromTop(22.0f);
-      const bool hdrHov = (hoveredKind == 4 && hoveredIndex == grp);
-      if (hdrHov) {
-        g.setColour(accent.withAlpha(0.18f));
-        g.fillRoundedRectangle(colHdr, 4.0f);
+      const bool hdrHov =
+          (!isDraggingItem && !isDraggingColumn && hoveredKind == 4 &&
+           hoveredIndex == grp);
+      if (hdrHov || isDropCol) {
+        g.setColour(accent.withAlpha(isDropCol ? 0.24f : 0.18f));
+        g.fillRoundedRectangle(m.colHdr, 4.0f);
       }
       g.setFont(midas_ui::getFont(10.5f, true));
-      g.setColour(accent);
-      g.drawText(catNames[grp], colHdr.reduced(4.0f, 0.0f).toNearestInt(),
+      g.setColour(isDraggedCol ? accent.withAlpha(0.45f) : accent);
+      g.drawText(juce::String(visCol + 1) + ". " + catBaseNames[grp],
+                 m.colHdr.reduced(4.0f, 0.0f).withTrimmedRight(14.0f)
+                     .toNearestInt(),
                  juce::Justification::centredLeft);
 
-      colIn.removeFromTop(4.0f);
-      std::vector<int> indices;
-      for (size_t idx = 0; idx < cat.size(); ++idx) {
-        if (cat[idx].groupIdx == grp)
-          indices.push_back(static_cast<int>(idx));
-      }
+      // Subtle column move grip "::"
+      drawDragGrip(g,
+                   juce::Rectangle<float>(m.colHdr.getRight() - 13.0f,
+                                          m.colHdr.getY() + 4.0f, 10.0f,
+                                          m.colHdr.getHeight() - 8.0f),
+                   accent.withAlpha(0.45f));
+
+      const auto &indices = columnItems[static_cast<size_t>(grp)];
       const int itemCount = static_cast<int>(indices.size());
-      const float itemGap = 4.0f;
-      const float maxRowH =
-          (colIn.getHeight() -
-           itemGap * static_cast<float>(std::max(0, itemCount - 1))) /
-          static_cast<float>(std::max(1, itemCount));
-      const float rowH = juce::jlimit(22.0f, 44.0f, maxRowH);
+
+      if (itemCount == 0) {
+        auto emptyBox = m.itemsArea.withHeight(std::min(58.0f, m.itemsArea.getHeight()));
+        g.setColour(juce::Colour(0xff141e2f).withAlpha(0.6f));
+        g.fillRoundedRectangle(emptyBox, 6.0f);
+        const juce::Colour borderCol =
+            isDropCol ? midas_colors::kAccentCyan : juce::Colour(0xff2b3c56);
+        g.setColour(borderCol);
+        float dashes[2] = {4.0f, 3.0f};
+        juce::Path p;
+        p.addRoundedRectangle(emptyBox.reduced(1.0f), 6.0f);
+        juce::PathStrokeType(1.0f).createDashedStroke(p, p, dashes, 2);
+        g.fillPath(p);
+        g.setFont(midas_ui::getFont(9.0f, false));
+        g.setColour(isDropCol ? midas_colors::kAccentCyan
+                              : midas_colors::kTextMuted);
+        g.drawText("Kosong - Tarik ke sini", emptyBox.toNearestInt(),
+                   juce::Justification::centred, true);
+      }
 
       for (int r = 0; r < itemCount; ++r) {
         const int catIdx = indices[static_cast<size_t>(r)];
         const auto &item = cat[static_cast<size_t>(catIdx)];
-        auto rowRect = colIn.removeFromTop(rowH);
-        const bool isHov = (hoveredKind == 3 && hoveredIndex == catIdx);
+        auto rowRect = getItemRect(m, r);
+        const bool isDragSrc = (isDraggingItem && dragCatalogIdx == catIdx);
+        const bool isHov = (!isDraggingItem && !isDraggingColumn &&
+                            hoveredKind == 3 && hoveredIndex == catIdx);
         const bool isAct = (item.groupIdx == activeGroupIdx &&
                             item.subPage == activeSubPageIdx);
         const bool isFav = isFavorite(item.groupIdx, item.subPage);
         const juce::Colour itemAcc(item.colorHex);
+        const float cardAlpha = isDragSrc ? 0.35f : 1.0f;
 
-        g.setColour(isHov ? juce::Colour(0xff1e2d45)
-                          : (isAct ? itemAcc.withAlpha(0.20f)
-                                   : juce::Colour(0xff141e2f)));
+        g.setColour((isHov ? juce::Colour(0xff1e2d45)
+                           : (isAct ? itemAcc.withAlpha(0.20f)
+                                    : juce::Colour(0xff141e2f)))
+                        .withMultipliedAlpha(cardAlpha));
         g.fillRoundedRectangle(rowRect, 6.0f);
-        g.setColour(isAct ? itemAcc
-                          : (isHov ? itemAcc.withAlpha(0.75f)
-                                   : juce::Colour(0xff223047)));
+        g.setColour((isAct ? itemAcc
+                           : (isHov ? itemAcc.withAlpha(0.75f)
+                                    : juce::Colour(0xff223047)))
+                        .withMultipliedAlpha(cardAlpha));
         g.drawRoundedRectangle(rowRect, 6.0f, isAct ? 1.4f : 0.8f);
 
-        auto rIn = rowRect.reduced(6.0f, 3.0f);
+        auto rIn = rowRect.reduced(6.0f, 2.0f);
+        const float badgeH = std::min(18.0f, std::max(12.0f, rIn.getHeight()));
         auto badgeRect =
-            rIn.removeFromLeft(24.0f).withSizeKeepingCentre(22.0f, 18.0f);
-        g.setColour(itemAcc.withAlpha(0.16f));
+            rIn.removeFromLeft(24.0f).withSizeKeepingCentre(22.0f, badgeH);
+        g.setColour(itemAcc.withAlpha(0.16f * cardAlpha));
         g.fillRoundedRectangle(badgeRect, 4.0f);
-        g.setFont(midas_ui::getFont(7.8f, true));
-        g.setColour(itemAcc);
+        g.setFont(midas_ui::getFont(7.6f, true));
+        g.setColour(itemAcc.withMultipliedAlpha(cardAlpha));
         g.drawText(item.badge, badgeRect.toNearestInt(),
                    juce::Justification::centred);
         rIn.removeFromLeft(5.0f);
 
+        drawDragGrip(g,
+                     juce::Rectangle<float>(rIn.getRight() - 9.0f, rIn.getY(),
+                                            8.0f, rIn.getHeight()),
+                     juce::Colour(0xff64748b).withMultipliedAlpha(cardAlpha));
+        rIn.removeFromRight(10.0f);
+
         if (isFav) {
           g.setFont(midas_ui::getFont(10.0f, true));
-          g.setColour(midas_colors::kAccentGold);
+          g.setColour(midas_colors::kAccentGold.withMultipliedAlpha(cardAlpha));
           g.drawText("*", rIn.removeFromRight(12.0f).toNearestInt(),
                      juce::Justification::centred);
         }
-        g.setFont(midas_ui::getFont(10.0f, isAct || isHov));
-        g.setColour(isAct ? juce::Colours::white : juce::Colour(0xffe2e8f0));
+        g.setFont(midas_ui::getFont(rowRect.getHeight() < 22.0f ? 9.0f : 10.0f,
+                                    isAct || isHov));
+        g.setColour((isAct ? juce::Colours::white : juce::Colour(0xffe2e8f0))
+                        .withMultipliedAlpha(cardAlpha));
         g.drawText(item.title, rIn.toNearestInt(),
                    juce::Justification::centredLeft, true);
-
-        if (r + 1 < itemCount)
-          colIn.removeFromTop(itemGap);
       }
+
+      if (isDraggingItem && dragTargetGroup == grp) {
+        float lineY = m.itemsArea.getY() + 12.0f;
+        if (itemCount > 0) {
+          if (dragTargetRow <= 0)
+            lineY = m.itemsArea.getY() - 1.5f;
+          else if (dragTargetRow >= itemCount)
+            lineY = getItemRect(m, itemCount - 1).getBottom() + 1.5f;
+          else
+            lineY = getItemRect(m, dragTargetRow).getY() - m.itemGap * 0.5f;
+        }
+        g.setColour(midas_colors::kAccentGold);
+        g.fillRoundedRectangle(m.itemsArea.getX(), lineY - 1.5f,
+                               m.itemsArea.getWidth(), 3.0f, 1.5f);
+        g.fillEllipse(m.itemsArea.getX() - 2.0f, lineY - 3.5f, 7.0f, 7.0f);
+        g.fillEllipse(m.itemsArea.getRight() - 5.0f, lineY - 3.5f, 7.0f, 7.0f);
+      }
+    }
+
+    if (isDraggingItem && dragCatalogIdx >= 0 &&
+        dragCatalogIdx < static_cast<int>(cat.size())) {
+      const auto &dragItem = cat[static_cast<size_t>(dragCatalogIdx)];
+      const juce::Colour acc(dragItem.colorHex);
+      auto ghost = juce::Rectangle<float>(170.0f, 28.0f)
+                       .withCentre(currentDragPos);
+      g.setColour(juce::Colour(0xff0b1322).withAlpha(0.92f));
+      g.fillRoundedRectangle(ghost, 7.0f);
+      g.setColour(acc);
+      g.drawRoundedRectangle(ghost, 7.0f, 1.6f);
+
+      auto gIn = ghost.reduced(6.0f, 4.0f);
+      auto gBadge =
+          gIn.removeFromLeft(24.0f).withSizeKeepingCentre(22.0f, 18.0f);
+      g.setColour(acc.withAlpha(0.22f));
+      g.fillRoundedRectangle(gBadge, 4.0f);
+      g.setFont(midas_ui::getFont(7.8f, true));
+      g.setColour(acc);
+      g.drawText(dragItem.badge, gBadge.toNearestInt(),
+                 juce::Justification::centred);
+      gIn.removeFromLeft(6.0f);
+      g.setFont(midas_ui::getFont(10.0f, true));
+      g.setColour(juce::Colours::white);
+      g.drawText(dragItem.title, gIn.toNearestInt(),
+                 juce::Justification::centredLeft, true);
+    } else if (isDraggingColumn && dragSourceVisCol >= 0 &&
+               dragSourceVisCol < 5) {
+      const int grp = columnOrder[static_cast<size_t>(dragSourceVisCol)];
+      const juce::Colour acc(catCols[grp]);
+      auto pill = juce::Rectangle<float>(150.0f, 28.0f)
+                      .withCentre(currentDragPos);
+      g.setColour(juce::Colour(0xff0b1322).withAlpha(0.94f));
+      g.fillRoundedRectangle(pill, 7.0f);
+      g.setColour(acc);
+      g.drawRoundedRectangle(pill, 7.0f, 1.6f);
+      g.setFont(midas_ui::getFont(10.5f, true));
+      g.drawText(juce::String("PINDAH KOLOM: ") + catBaseNames[grp],
+                 pill.toNearestInt(), juce::Justification::centred, true);
     }
   }
 
 private:
+  struct ColumnMetrics {
+    int visCol = 0;
+    int grp = 0;
+    juce::Rectangle<float> colRect;
+    juce::Rectangle<float> colHdr;
+    juce::Rectangle<float> itemsArea;
+    float itemGap = 4.0f;
+    float rowH = 30.0f;
+  };
+
+  static juce::File getLayoutFile() {
+    return juce::File::getSpecialLocation(
+               juce::File::userApplicationDataDirectory)
+        .getChildFile("OpenLiveHD")
+        .getChildFile("console_directory_layout_v1.txt");
+  }
+
+  void saveLayoutToDisk() const {
+    const auto file = getLayoutFile();
+    if (!file.getParentDirectory().exists())
+      file.getParentDirectory().createDirectory();
+
+    juce::StringArray lines;
+    juce::StringArray colTokens;
+    for (int c : columnOrder)
+      colTokens.add(juce::String(c));
+    lines.add("COLS:" + colTokens.joinIntoString(","));
+
+    for (int g = 0; g < 5; ++g) {
+      juce::StringArray itemTokens;
+      for (int idx : columnItems[static_cast<size_t>(g)])
+        itemTokens.add(juce::String(idx));
+      lines.add("GRP" + juce::String(g) + ":" +
+                itemTokens.joinIntoString(","));
+    }
+    file.replaceWithText(lines.joinIntoString("\n") + "\n");
+  }
+
+  void loadLayoutFromDisk() {
+    resetLayoutToDefault(false);
+    const auto file = getLayoutFile();
+    if (!file.existsAsFile())
+      return;
+
+    const auto lines = juce::StringArray::fromLines(file.loadFileAsString());
+    std::array<int, 5> parsedOrder = {0, 1, 2, 3, 4};
+    bool hasOrder = false;
+    std::array<std::vector<int>, 5> parsedItems;
+    const auto &cat = getCatalog();
+    const int nCat = static_cast<int>(cat.size());
+    std::vector<bool> seen(static_cast<size_t>(nCat), false);
+    bool hasAnyGroupLine = false;
+
+    for (const auto &rawLine : lines) {
+      const auto line = rawLine.trim();
+      if (line.startsWith("COLS:")) {
+        auto toks = juce::StringArray::fromTokens(line.substring(5), ",", "");
+        if (toks.size() == 5) {
+          std::array<bool, 5> used{};
+          bool valid = true;
+          for (int i = 0; i < 5; ++i) {
+            const int v = toks[i].trim().getIntValue();
+            if (v < 0 || v >= 5 || used[static_cast<size_t>(v)]) {
+              valid = false;
+              break;
+            }
+            used[static_cast<size_t>(v)] = true;
+            parsedOrder[static_cast<size_t>(i)] = v;
+          }
+          if (valid)
+            hasOrder = true;
+        }
+      } else if (line.startsWith("GRP") && line.length() >= 5 &&
+                 line[4] == ':') {
+        const int grp = line.substring(3, 4).getIntValue();
+        if (grp >= 0 && grp < 5) {
+          hasAnyGroupLine = true;
+          auto toks = juce::StringArray::fromTokens(line.substring(5), ",", "");
+          for (const auto &tok : toks) {
+            if (tok.trim().isEmpty())
+              continue;
+            const int idx = tok.trim().getIntValue();
+            if (idx >= 0 && idx < nCat && !seen[static_cast<size_t>(idx)]) {
+              seen[static_cast<size_t>(idx)] = true;
+              parsedItems[static_cast<size_t>(grp)].push_back(idx);
+            }
+          }
+        }
+      }
+    }
+
+    if (hasOrder)
+      columnOrder = parsedOrder;
+
+    if (hasAnyGroupLine) {
+      for (int idx = 0; idx < nCat; ++idx) {
+        if (!seen[static_cast<size_t>(idx)]) {
+          const int defGrp =
+              juce::jlimit(0, 4, cat[static_cast<size_t>(idx)].groupIdx);
+          parsedItems[static_cast<size_t>(defGrp)].push_back(idx);
+        }
+      }
+      columnItems = std::move(parsedItems);
+    }
+    updateResetButtonAppearance();
+  }
+
+  void updateResetButtonAppearance() {
+    const bool def = isDefaultLayout();
+    resetLayoutBtn.setColour(
+        juce::TextButton::textColourOffId,
+        def ? juce::Colour(0xff64748b) : juce::Colour(0xff38bdf8));
+  }
+
+  void clearDragState() {
+    pressedKind = -1;
+    pressedIndex = -1;
+    isDraggingItem = false;
+    dragCatalogIdx = -1;
+    dragTargetGroup = -1;
+    dragTargetRow = -1;
+    isDraggingColumn = false;
+    dragSourceVisCol = -1;
+    dragTargetVisCol = -1;
+  }
+
+  juce::Rectangle<float> getDirectoryArea() const {
+    auto inner = getLocalBounds().toFloat().reduced(12.0f, 8.0f);
+    inner.removeFromTop(34.0f);
+    return inner;
+  }
+
+  ColumnMetrics getColumnMetrics(int visCol) const {
+    ColumnMetrics m;
+    m.visCol = juce::jlimit(0, 4, visCol);
+    m.grp = columnOrder[static_cast<size_t>(m.visCol)];
+    const auto dirArea = getDirectoryArea();
+    const float colGap = 7.0f;
+    const float colW = (dirArea.getWidth() - colGap * 4.0f) / 5.0f;
+    m.colRect = juce::Rectangle<float>(
+        dirArea.getX() + static_cast<float>(m.visCol) * (colW + colGap),
+        dirArea.getY(), colW, dirArea.getHeight());
+    auto colIn = m.colRect.reduced(6.0f, 6.0f);
+    m.colHdr = colIn.removeFromTop(22.0f);
+    colIn.removeFromTop(4.0f);
+    m.itemsArea = colIn;
+
+    const int itemCount =
+        static_cast<int>(columnItems[static_cast<size_t>(m.grp)].size());
+    m.itemGap = (itemCount > 7) ? 2.5f : 4.0f;
+    const float maxRowH =
+        (m.itemsArea.getHeight() -
+         m.itemGap * static_cast<float>(std::max(0, itemCount - 1))) /
+        static_cast<float>(std::max(1, itemCount));
+    m.rowH = juce::jlimit(16.0f, 44.0f, maxRowH);
+    return m;
+  }
+
+  juce::Rectangle<float> getItemRect(const ColumnMetrics &m, int rowIdx) const {
+    return juce::Rectangle<float>(
+        m.itemsArea.getX(),
+        m.itemsArea.getY() + static_cast<float>(rowIdx) * (m.rowH + m.itemGap),
+        m.itemsArea.getWidth(), m.rowH);
+  }
+
+  int computeClosestVisCol(float x) const {
+    int bestCol = 0;
+    float bestDist = 1.0e9f;
+    for (int vc = 0; vc < 5; ++vc) {
+      const auto m = getColumnMetrics(vc);
+      if (x >= m.colRect.getX() && x <= m.colRect.getRight())
+        return vc;
+      const float d = std::abs(x - m.colRect.getCentreX());
+      if (d < bestDist) {
+        bestDist = d;
+        bestCol = vc;
+      }
+    }
+    return bestCol;
+  }
+
+  std::pair<int, int> computeItemDropTarget(juce::Point<float> p) const {
+    const int visCol = computeClosestVisCol(p.x);
+    const auto m = getColumnMetrics(visCol);
+    const int itemCount =
+        static_cast<int>(columnItems[static_cast<size_t>(m.grp)].size());
+    for (int r = 0; r < itemCount; ++r) {
+      if (p.y < getItemRect(m, r).getCentreY())
+        return {m.grp, r};
+    }
+    return {m.grp, itemCount};
+  }
+
+  static void drawDragGrip(juce::Graphics &g, juce::Rectangle<float> box,
+                           juce::Colour col) {
+    g.setColour(col);
+    const float cx = box.getCentreX();
+    const float cy = box.getCentreY();
+    for (int dy = -1; dy <= 1; ++dy) {
+      const float y = cy + static_cast<float>(dy) * 3.5f - 1.0f;
+      g.fillEllipse(cx - 3.0f, y, 2.0f, 2.0f);
+      g.fillEllipse(cx + 1.0f, y, 2.0f, 2.0f);
+    }
+  }
+
+  void showContextMenu(std::pair<int, int> hit, const juce::MouseEvent &e) {
+    static const char *catBaseNames[5] = {"MIX", "ROUTING", "FX", "SHOW",
+                                          "SYSTEM"};
+    juce::Component::SafePointer<AndroidHomeLauncherView> safeThis(this);
+
+    if (hit.first == 3) {
+      const int catIdx = hit.second;
+      const auto &cat = getCatalog();
+      if (catIdx < 0 || catIdx >= static_cast<int>(cat.size()))
+        return;
+      const auto &item = cat[static_cast<size_t>(catIdx)];
+
+      int srcGrp = 0;
+      int srcRow = 0;
+      for (int g = 0; g < 5; ++g) {
+        const auto &vec = columnItems[static_cast<size_t>(g)];
+        for (size_t r = 0; r < vec.size(); ++r) {
+          if (vec[r] == catIdx) {
+            srcGrp = g;
+            srcRow = static_cast<int>(r);
+          }
+        }
+      }
+      const int colCount =
+          static_cast<int>(columnItems[static_cast<size_t>(srcGrp)].size());
+      const bool isFav = isFavorite(item.groupIdx, item.subPage);
+
+      juce::PopupMenu menu;
+      menu.addItem(1, juce::String("Buka ") + item.title);
+      menu.addSeparator();
+      menu.addItem(2, isFav ? "Hapus dari Favorit (*)"
+                            : "Jadikan Favorit (*)");
+      menu.addSeparator();
+      menu.addItem(3, "Geser Naik", srcRow > 0);
+      menu.addItem(4, "Geser Turun", srcRow + 1 < colCount);
+
+      juce::PopupMenu colSub;
+      for (int vc = 0; vc < 5; ++vc) {
+        const int g = columnOrder[static_cast<size_t>(vc)];
+        colSub.addItem(100 + g,
+                       juce::String(vc + 1) + ". " + catBaseNames[g], true,
+                       g == srcGrp);
+      }
+      menu.addSubMenu("Pindah ke Kolom", colSub);
+      menu.addSeparator();
+      menu.addItem(99, "Reset Semua Posisi ke Default");
+
+      menu.showMenuAsync(
+          juce::PopupMenu::Options().withTargetScreenArea(
+              juce::Rectangle<int>(e.getScreenX(), e.getScreenY(), 1, 1)),
+          [safeThis, catIdx, srcGrp, srcRow, item](int res) {
+            if (safeThis == nullptr || res == 0)
+              return;
+            if (res == 1 && safeThis->onPageSelected) {
+              safeThis->onPageSelected(item.groupIdx, item.subPage);
+            } else if (res == 2 && safeThis->onToggleFavorite) {
+              safeThis->onToggleFavorite(item.groupIdx, item.subPage);
+            } else if (res == 3) {
+              safeThis->moveCatalogItem(catIdx, srcGrp, srcRow - 1, true);
+            } else if (res == 4) {
+              safeThis->moveCatalogItem(catIdx, srcGrp, srcRow + 2, true);
+            } else if (res >= 100 && res < 105) {
+              const int dstGrp = res - 100;
+              safeThis->moveCatalogItem(
+                  catIdx, dstGrp,
+                  static_cast<int>(
+                      safeThis->columnItems[static_cast<size_t>(dstGrp)]
+                          .size()),
+                  true);
+            } else if (res == 99) {
+              safeThis->resetLayoutToDefault(true);
+            }
+          });
+    } else if (hit.first == 4) {
+      const int grp = hit.second;
+      int visCol = -1;
+      for (int vc = 0; vc < 5; ++vc) {
+        if (columnOrder[static_cast<size_t>(vc)] == grp) {
+          visCol = vc;
+          break;
+        }
+      }
+      if (visCol < 0)
+        return;
+
+      juce::PopupMenu menu;
+      menu.addItem(1, "Geser Kolom ke Kiri", visCol > 0);
+      menu.addItem(2, "Geser Kolom ke Kanan", visCol < 4);
+      menu.addSeparator();
+      menu.addItem(99, "Reset Semua Posisi ke Default");
+
+      menu.showMenuAsync(
+          juce::PopupMenu::Options().withTargetScreenArea(
+              juce::Rectangle<int>(e.getScreenX(), e.getScreenY(), 1, 1)),
+          [safeThis, visCol](int res) {
+            if (safeThis == nullptr || res == 0)
+              return;
+            if (res == 1 && visCol > 0)
+              safeThis->swapVisualColumns(visCol, visCol - 1, true);
+            else if (res == 2 && visCol < 4)
+              safeThis->swapVisualColumns(visCol, visCol + 1, true);
+            else if (res == 99)
+              safeThis->resetLayoutToDefault(true);
+          });
+    }
+  }
 
   bool isFavorite(int grp, int sub) const {
     for (const auto &f : favoriteKeys) {
@@ -1531,8 +2169,7 @@ private:
   //   kind 3 = catalog index
   //   kind 4 = category header (groupIdx 0..4)
   std::pair<int, int> hitTest(juce::Point<float> p) const {
-    auto inner = getLocalBounds().toFloat().reduced(12.0f, 8.0f);
-    inner.removeFromTop(34.0f);
+    auto inner = getDirectoryArea();
 
     const auto q = searchBox.getText().trim();
     if (q.isNotEmpty()) {
@@ -1556,40 +2193,16 @@ private:
       return {-1, -1};
     }
 
-    const float colGap = 7.0f;
-    const float colW = (inner.getWidth() - colGap * 4.0f) / 5.0f;
-    const auto &cat = getCatalog();
+    for (int visCol = 0; visCol < 5; ++visCol) {
+      const auto m = getColumnMetrics(visCol);
+      if (m.colHdr.contains(p))
+        return {4, m.grp};
 
-    for (int grp = 0; grp < 5; ++grp) {
-      auto colRect = juce::Rectangle<float>(
-          inner.getX() + static_cast<float>(grp) * (colW + colGap),
-          inner.getY(), colW, inner.getHeight());
-      auto colIn = colRect.reduced(6.0f, 6.0f);
-      auto colHdr = colIn.removeFromTop(22.0f);
-      if (colHdr.contains(p))
-        return {4, grp};
-
-      colIn.removeFromTop(4.0f);
-      std::vector<int> indices;
-      for (size_t idx = 0; idx < cat.size(); ++idx) {
-        if (cat[idx].groupIdx == grp)
-          indices.push_back(static_cast<int>(idx));
-      }
+      const auto &indices = columnItems[static_cast<size_t>(m.grp)];
       const int itemCount = static_cast<int>(indices.size());
-      const float itemGap = 4.0f;
-      const float maxRowH =
-          (colIn.getHeight() -
-           itemGap * static_cast<float>(std::max(0, itemCount - 1))) /
-          static_cast<float>(std::max(1, itemCount));
-      const float rowH = juce::jlimit(22.0f, 44.0f, maxRowH);
-
       for (int r = 0; r < itemCount; ++r) {
-        const int catIdx = indices[static_cast<size_t>(r)];
-        auto rowRect = colIn.removeFromTop(rowH);
-        if (rowRect.contains(p))
-          return {3, catIdx};
-        if (r + 1 < itemCount)
-          colIn.removeFromTop(itemGap);
+        if (getItemRect(m, r).contains(p))
+          return {3, indices[static_cast<size_t>(r)]};
       }
     }
     return {-1, -1};
@@ -1597,11 +2210,26 @@ private:
 
   juce::TextEditor searchBox;
   juce::TextButton clearSearchBtn;
+  juce::TextButton resetLayoutBtn{"RESET POSISI"};
+  std::array<std::vector<int>, 5> columnItems;
+  std::array<int, 5> columnOrder = {0, 1, 2, 3, 4};
   std::vector<std::pair<int, int>> favoriteKeys;
   int activeGroupIdx = 0;
   int activeSubPageIdx = 0;
   int hoveredKind = -1;
   int hoveredIndex = -1;
+
+  int pressedKind = -1;
+  int pressedIndex = -1;
+  juce::Point<float> mouseDownPos{};
+  juce::Point<float> currentDragPos{};
+  bool isDraggingItem = false;
+  int dragCatalogIdx = -1;
+  int dragTargetGroup = -1;
+  int dragTargetRow = -1;
+  bool isDraggingColumn = false;
+  int dragSourceVisCol = -1;
+  int dragTargetVisCol = -1;
 };
 
 class AndroidRecentWorkspaceView final : public juce::Component {
@@ -8993,6 +9621,9 @@ public:
       homeLauncherView.setVisible(false);
       selectNav(static_cast<MainNavGroup>(juce::jlimit(0, 4, grpIdx)), subPage);
     };
+    homeLauncherView.onToggleFavorite = [this](int grpIdx, int subPage) {
+      toggleFavoriteForPage(grpIdx, subPage);
+    };
     homeLauncherView.onAppSelected = [this](int appIdx) {
       homeLauncherView.setVisible(false);
       if (appIdx == 0)
@@ -9634,22 +10265,28 @@ public:
     return false;
   }
 
-  void toggleCurrentPageFavorite() {
-    const int g = static_cast<int>(activeGroup);
+  void toggleFavoriteForPage(int g, int sub) {
     auto it = std::find_if(favoriteEntries.begin(), favoriteEntries.end(),
                            [&](const auto &f) {
-                             return f.groupIdx == g &&
-                                    f.subPage == activeSubPage;
+                             return f.groupIdx == g && f.subPage == sub;
                            });
     if (it != favoriteEntries.end()) {
       favoriteEntries.erase(it);
     } else {
       AndroidRecentWorkspaceView::Entry entry;
-      entry.title = activePageTitle;
-      entry.groupLabel = activeGroupTag;
+      const int catIdx = AndroidHomeLauncherView::findCatalogIndex(g, sub);
+      if (catIdx >= 0) {
+        const auto &def = AndroidHomeLauncherView::getCatalog()[static_cast<size_t>(catIdx)];
+        entry.title = def.title;
+        entry.groupLabel = def.groupName;
+        entry.accent = juce::Colour(def.colorHex);
+      } else {
+        entry.title = activePageTitle;
+        entry.groupLabel = activeGroupTag;
+        entry.accent = activePageAccent;
+      }
       entry.groupIdx = g;
-      entry.subPage = activeSubPage;
-      entry.accent = activePageAccent;
+      entry.subPage = sub;
       favoriteEntries.insert(favoriteEntries.begin(), entry);
       if (favoriteEntries.size() > 6)
         favoriteEntries.resize(6);
@@ -9659,6 +10296,10 @@ public:
     syncLauncherFavorites();
     if (recentView.isVisible())
       recentView.setFavorites(favoriteEntries);
+  }
+
+  void toggleCurrentPageFavorite() {
+    toggleFavoriteForPage(static_cast<int>(activeGroup), activeSubPage);
   }
 
   AndroidHomeLauncherView &getHomeLauncherView() { return homeLauncherView; }

@@ -7251,6 +7251,34 @@ public:
       expect(!consoleSurface->isGroupButtonBarVisible(),
              "Circled top group bar must remain hidden on wide surface");
 
+      // 1c. Customizable & movable Console Directory items and column order
+      auto &launcher = consoleSurface->getHomeLauncherView();
+      launcher.resetLayoutToDefault(false);
+      expect(launcher.isDefaultLayout(),
+             "Home launcher should start in default layout after reset");
+
+      const int vcCatIdx = AndroidHomeLauncherView::findCatalogIndex(4, 2);
+      expect(vcCatIdx >= 0, "Virtual Cable catalog index must exist");
+      expect(launcher.moveCatalogItem(vcCatIdx, 0, 0, false),
+             "Should move Virtual Cable to top of MIX column");
+      expect(launcher.getAssignedGroupForPage(4, 2) == 0,
+             "Virtual Cable should now be assigned to column 0 (MIX)");
+      expect(!launcher.getItemsInGroup(0).empty() &&
+                 launcher.getItemsInGroup(0).front() == vcCatIdx,
+             "Virtual Cable should be at front of column 0");
+      expect(!launcher.isDefaultLayout(),
+             "Layout should report customized after moving module card");
+
+      expect(launcher.swapVisualColumns(0, 4, false),
+             "Should swap visual column 0 and column 4");
+      expect(launcher.getColumnOrder()[0] == 4 &&
+                 launcher.getColumnOrder()[4] == 0,
+             "Column order should reflect swapped columns");
+
+      launcher.resetLayoutToDefault(true);
+      expect(launcher.isDefaultLayout(),
+             "resetLayoutToDefault should restore default item and column order");
+
       // 2. State readout verification across all console parameters
       auto &ch = engine.channels[0];
       ch.gainDb.store(-3.5f, std::memory_order_relaxed);
