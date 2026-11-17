@@ -1,0 +1,378 @@
+p.125: returned to a channel of your choice. For example, this can be used to send several paths to the same reverb. Up to 24 DSP slots are available and effects are assigned 
+p.125: dependant on their DSP value. For example, many effects can have many instances in an Effect slot (sub-slots) or take up 3 entire slots (VSS4) if they require the 
+p.126: Ambience reverb 1 in 1 slot R-Comp 4 in 1 slot
+p.126: Chamber reverb 1 in 1 slot Smart dynamics 1 in 1 slot
+p.126: Dn780 1 in 1 slot SQ1 4 in 1 slot
+p.126: Hall reverb 1 in 1 slot Wave Designer 4 in 1 slot
+p.126: TC M350 2 in 1 slot Stressor 4 in 1 slot
+p.126: Plate reverb 1 in 1 slot Dynamic EQ     1 in 1 slot
+p.126: Vintage reverb 1 in 1 slot EQP-HD 4 in 1 slot
+p.126: VSS4 reverb 3 full slots Graphic EQ 2 in 1 slot
+p.126: Midas delay 1 in 1 slot MEQ-HD 4 in 1 slot
+p.126: Stereo delay 2 in 1 slot Chorus 2 in 1 slot
+p.126: Channel Limiter 2 in 1 slot U-flange 1 in 1 slot
+p.126: DSR 4 in 1 slot U-phase 1 in 1 slot
+p.126: HD 2a 4 in 1 slot Pitch Shifter 2 in 1 slot
+p.126: 1176 K T 4 in 1 slot Rack Amp 1 in 1 slot
+p.126: KT Bus Compressor 4 in 1 slot Sub monster 1 in 1 slot
+p.126: 3 Band Comp 1 in 1 slot Tape saturation 1 in 1 slot
+p.126: M6 Multiband comp 1 in 1 slot UNCL.HD 1 in 1 slot
+p.126: VSS3 reverb 1 in 1 slot XL4 EQ 4 in 1 slot
+p.127: The blue boxes display how many effects can be used per DSP slot. In the example below 4 x R-Comps can be seen in slot 1 and an instance of VSS4 is filling slot 
+p.128: example, you can use up to 4 stereo channels of R-Comp in one slot space. Short press an effect to select it and to see if sub-slots are available. Long press an effect to 
+p.130: R-comps can be used in 1 effects slot space.
+p.130: settings safe engaged, i.e. a delay to a reverb, the settings will change. Press and hold, then select the effect(s) you wish to add to Settings Safe or select an effect 
+p.132: With FX Mode  active, if a channel is in Aux Return Mode, when you select the channel again the FX patch to that channel will open. This is great for your reverb and 
+p.132: delay returns.
+p.133: Reverbs:
+p.133: Virtual DN780 Reverb effect
+p.133: The Virtual DN780 Reverb provides emulation of the vintage Klark Teknik DN780 Digital Effect unit. The DN780 is not just a reverberation device, it also gives the user a 
+p.133: versatility, making it a very powerful acoustic processing package. The parameter controls give accurate adjustment of all reverberation parameters and allow the 
+p.133: 3 Pre Delay control Controls the amount of delay (in milliseconds) between the initial signal and the onset of reverberation. On certain program types, pre-delay is inserted between early reflections and reverb to improve authenticity. Its range is algorithm dependent.
+p.133: 5 Decay control Control that sets the overall (mid-band) reverberation decay time. Range is from 0.1 to 18 seconds, depending on room size.
+p.133: 6 Pattern  control Controls the ‘density’ of early reflections. Selects the number and spacing of Early Reflections/ADT/Multi-tap delays. Range is from 1 to 9.
+p.133: 8 LF (low frequency) control Control that adjusts the decay time at the low end of the reverb spectrum. Range is from -7 to +7.
+p.133: 9 HF (high frequency) control Control that adjusts the decay time at the high end of the reverb spectrum, which sets the absorption characteristic of the simulated space. Range is from -7 to +7.
+p.133: 12 Presets Selection Buttons These algorithms emulate the ones on the original DN780. Use the buttons to select the type of effect you desire.
+p.133: 13 IN button Control for removing feed to the reverberation section, enabling the decay qualities of the chosen setting to be confirmed. 
+p.133: 15 Audition A sample is triggered to test reverb characteristic.
+p.133: 17 Bypass  button Turns the Virtual DN780 Reverb effect off.
+p.134: Pre-delay
+p.134: 0 to 990 milliseconds (ms) of pre-delay is available allowing a very wide range of control. Delays of less than 30ms closely integrate the direct and reverberant sounds; 
+p.134: often a desirable feature on percussive sounds. Delays of 50ms or more cause the direct and reverberant sounds to separate and convey a feeling of depth and distance 
+p.134: The reverberation decay time is adjustable from 0.1 to 18 seconds, depending on room size, changing the reverberant field from a virtually dead sound to a totally 
+p.134: classic reverberation is not wanted. Reverb times of 1 to 4 seconds cover the majority of normal applications where classic reverberation is required. Longer decay 
+p.134: on the reverberation time and construction of the room, but also to a great extent on its volume. The room size control is, in fact, essential if authentic simulation of a 
+p.134: This section gives details of the effect’s programs available on the DN780 Reverb effect.
+p.134: Delay 
+p.134: PRE-DELAY control adjusts the delay time within the range 0 to 2.0 seconds.
+p.134: Preset parameters:  On selecting this effect program, delay is set to 200 ms.
+p.134: Stereo mix: The signal’s at left and right outputs are both delayed by the same amount as set using the PRE-DELAY control, that is, they are essentially monophonic.
+p.135: PRE-DELAY control adjusts the delay time before the second voice is heard. Delay is adjustable within the range 0 to 127ms.
+p.135: Preset parameters:  On selecting this effect program, delay is set to 40ms and pattern is Pattern 5 (a wide multi-voiced effect).
+p.135: Stereo mix: Left and right output signal’s use different delay taps to achieve a stereo effect. Using only one output halves the number of ‘voices’ , that is, Pattern 1 
+p.135: 1. Try delays from 25 to 50ms. Short delays reduce the effect, long delays produce echo.
+p.135: 3.  For conventional ADT, try ‘Delay’ of 40ms, Pattern 1, and use one output only, panned, say, fully right. Pan direct signal fully left and use a 50/50 direct/effect mix.
+p.135: PRE-DELAY control adjusts the time delay interval between the direct signal and the first repeat. Delay is adjustable from 0 to 990ms.
+p.135: Preset parameters:  On selecting this effect program: delay is set to 196ms; pattern is Pattern 4; decay is 73; and HF is 0. These settings give an effect similar to a 
+p.135: typical multi-head tape echo, but with full stereo image.
+p.135: Stereo mix: Different delay taps are used for left and right outputs to achieve a stereo effect. Using only one output halves the number of taps, that is, Pattern 1 (one 
+p.135: 1. Set delay time as required, generally fairly short for multi-echoes (higher pattern numbers), and longer for repeat echo. ‘Fine tune’ delay setting to set exact 
+p.135: 3. For single tap repeat echo, start with Pattern 1, with ‘Delay’ , ‘HF’ and ‘Decay’ all set at maximum. Reduce parameters as required. Use one output only.
+p.135: PRE-DELAY control sets the ‘loop length’ and hence the timing of the effect between 0 and 2.0 seconds.
+p.135: Preset parameters:  On selecting this effect program: pre-delay is set to 2.0s; level is 0; and decay is 99. These settings represent maximum loop length with zero 
+p.135: Stereo mix: Outputs left, and right are essentially identical. However, to avoid the possibility of slight phase cancellations, it is recommended that only one output is 
+p.136: 2. Correct pre-delay (‘loop length’) should be set before creating the effect as attempts to alter this later will usually destroy part of the recorded sound.
+p.136: PRE-DELAY control sets the delay between the direct signal and the onset of the effect. Maximum pre-delay is 990ms.
+p.136: 1. Alive – on selecting this effect program: pre-delay is 0s; pattern is 9; decay is 8.3; LF is +0; and HF is +2.
+p.136: 2. Non-Linear – on selecting this effect program: pre-delay is 0s; pattern is 4; decay is 5.4 LF is 0; and HF is 0.
+p.136: 3. Reverse – on selecting this effect program: pre-delay is 0s; pattern is 4; decay is 12; LF is 0; and HF is +2.
+p.136: Note: The DN780 Alive preset was used to great effect on the snare drum sound for David Bowie & Mick Jagger version of “Dancing in The Street”. 
+p.137: TC Electronic VSS4 Reverb
+p.137: VSS4 is a genuine Stereo Reverb that radically departs from blurry sustain concepts of the past. Based on source-related reflections from multiple angles, the precision 
+p.137: of VSS4 is comparable to real-world mono or stereo sources positioned in an authentic space.
+p.137: VSS4 is your first choice for spot and close microphone pick-ups as well as synthetic sources. It is not only capable of adding spaciousness, but also distinctive character, 
+p.137: 1 Main button Main settings page of the VSS4 reverb
+p.137: 6 Master Decay (Master Reverb) Range: 0.1 to 20 sec Adjusts the Master Reverb Decay time. Decay time can be further adjusted using the multiplier for the following bands: Lo, LoMid, HiMid and Hi. 
+p.137: 7 Pre Delay (Master Reverb) Range: 0 to 300ms, Pre-Delay on the complete wet signal including Early Reflections.
+p.137: 8 Hi Cut (Master Reverb) Determines the Hi Cut frequency for the Diffuse Field part of the Reverb. 
+p.137: 9 Reverb Delay (Master Reverb) Determines the delay before the reverb effect begins
+p.137: 10 Reverb Size (Master Reverb)
+p.137: 11 Reverb Width (Master Reverb) Adjusts the stereo width of the reverb
+p.137: precise and useful than a normal Pre-delay control. 
+p.138: 19 Reverb Level
+p.138: 20 Reverb Mute Reverb can also be muted.
+p.138: 23 Dry Level Attenuates the Dry signal level on the Output side thus leaving the Reverb and Early Level unaffected. Off equals a “kill-dry” setting. 
+p.138: more diffuse than low order ones. In VSS4 this effect is emulated by assigning individual diffusion 
+p.138: 27 Location (setup) Choose the type of reverb location
+p.138: 28 Source 1 (setup) Pan position of source 1. Adjust to change the width of the reverb in the stereo field display in the pan position window.
+p.138: 29 Source 2 (setup) Pan position of source 2. Adjust to change the width of the reverb in the stereo field display in the pan position window.
+p.139: Hi Soften is a special filter used to "soften" the high frequencies of Reverb diffuse field. This is not 
+p.139: give a "brittle" or “harsh” sounding Reverb. Hi Soften is scaled/linked to the Hi Cut and Hi Decay 
+p.140: 41 Reverb Type (Gloss) Choose between Coloured or Normal
+p.140: 43 Mod Type (Gloss) Select between different types of modulation on the five Reverb diffuse fields. 
+p.141: TC Electronic VSS3 Reverb
+p.141: The TC VSS3 reverb is a simplified version of the VSS4 reverb. It still has the great TC sound but is less DSP intensive and only takes 1 slot space instead of the 3 that the 
+p.141: VSS4 takes. The VSS3 enables you to add the softest and cleanest ambience to your work that you have ever heard. The wide range of presets will give you the exact 
+p.141: reverb you are looking for. 
+p.141: Constructing a Reverb Preset 
+p.141: The relationship of Early Reflections and the Reverb tail is very important in this algorithm. Adjusting the balance between the Early Lev and the Rev Lev parameters is 
+p.141: one of the easier ways to make a HUGE difference in the sound of your reverb! When you start building your preset you should try this: 
+p.141: • • First turn the Rev Lev all the way down. In a send/return configuration, push up the return level. You should now hear Early Reflections and no Reverb Tail. 
+p.141: • • Re-adjust the wet/dry balance until it is pleasing, then bring up the Rev Lev until the tail of the reverb becomes audible. Add just enough tail to make it work 
+p.141: The VSS3 was designed to have the smoothest Reverb tail ever developed, but it is the Early Reflections that define the “personality” of the room, so try and 
+p.141: experiment with this relationship! By using these parameters correctly, you can create a BIG sound without having a mix swimming in reverb wash. 
+p.141: Early Reflections define the actual feel of the room, where the Reverb tail is the less defined “bowl” of reflections that follows. The major part of the Early 
+p.141: Reflection patterns of the VSS3 are simulations of existing rooms and are based on a large number of reflections (40-100), which have been processed through an 
+p.141: of real rooms, the delay times of the first reflections are sonic and spatially “connected” to the direct signal. Using Pre Delay together with Early Reflections should 
+p.141: therefore be considered very carefully, as the acoustic space created by the pattern tends to “collapse” if too much Pre Delay is added. If you want the well-known 
+p.141: “slap back” reverb effect, you should use Rev Delay on the Reverb tail instead and reduce the level of the Early Reflections. 
+p.142: 3 Effect Reverb type Button Displays the current reverb type.
+p.142: 6 Levels - Reverb Level Control Adjusts the level of the reverb. From ∞ To 0 dB.
+p.142: 7 Early Delay Control Adjusts the early delay parameter. From 0 ms to 100 ms.
+p.142: 8 Reverb Delay Control Adjusts the amount of time before the reverb is heard. From 0 ms to 200 ms.
+p.142: 9 Decay - High Decay Control Applies filtering to the HF portion of the reverb. From 0.10 x to 2.5 x.
+p.142: 10 Decay - Decay Control Adjust the reverb tail length. From 0.10 s to 20 20 s. 
+p.142: 15 Reverb type select  - Buttons Select the type of reverb,  choose from: Rooms, Halls, Large, Plates, Vocal, Drums and Effects.
+p.142: 16 Reverb Preset - Buttons Select the reverb preset from the list dependant on which reverb type is selected.
+p.143: The M350 is an extremely user-friendly reverb processor which is equally suited for live and studio applications. It gives you 11 TC -quality reverb effects. 2 x M350 
+p.143: reverbs can be used in 1 DSP slot.  
+p.143: 1 Effect Select  - button 11 types of reverb are available. Ambience, Church, Gated, Hall, Lo-Fi, Mod, Plate, Room, Spring, Tile and Default. Tap to select.
+p.143: 2 Pre-Delay - control From 0 ms (min) up to 200 ms (max)
+p.143: 4 Colour Filter - control Controls the relative colour of the selected reverb from dark to crisp and bright.
+p.144: Ambience Reverb
+p.144:  The ambience reverb adds warmth and depth to source material without adding the obvious artefacts commonly associated with artificial reverbs. It simulates 
+p.144: smaller rooms using diffused early reflections with the additional flexibility of separate reverb tail level and decay control. Reflective surface materials and air 
+p.144: 2 Pre Delay control Controls the amount of delay (in milliseconds) between the initial signal and the onset of reverberation. 
+p.144: 4 Decay control Control that sets the overall (mid-band) reverberation decay time. Range is from 0.5 to 10 seconds, depending on room size.
+p.144: 5 Audition  button A sample is triggered to test reverb characteristic.
+p.144: 8 HF Damp Dampens the HF to produce a darker sounding reverb. Settings from 1 kHz to 20 kHz 
+p.144: 9 Diffusion  control Reducing diffusion creates more discrete echoes, for vocals and other sustained sounds, reduced diffusion can give smooth reverberation that doesn’t overpower the source and maintains clarity.
+p.144: 10 Modulation  control To create more variation in reverb sounds, modulation adds subtle changes to the reverb characteristics.
+p.144: 11 Power button  Turns on the Reverb effect. 
+p.144: 12 Tail Gain control Used to reduced the level of the reverb tail from 0 dB to -inf dB
+p.145: Vintage Room Reverb
+p.145: The vintage room reverb effect provides an incredibly natural sounding reverb in the style of the earliest digital reverberators that became popular during the 1980s. 
+p.145: parameters allow relative control over the low band reverb tail length. This can be used to either simulate real room responses, which often have a longer decay 
+p.145: reverberation of the venue. High frequency decay and cross-over parameters provide additional control over the high band reverb tail length.
+p.145: See Ambience Reverb for detailed control numbering information.
+p.145: 4 POWER button Turns on the Reverb effect. 
+p.145: 6 LF Decay control Adjusts the length of the low frequency section of the reverb in compression to the rest of the reverb tail.
+p.145: 7 LF X-over control Changes the X-Over point of the reverb from 20 Hz to 500 Hz
+p.145: 8 Audition A sample is triggered to test reverb characteristic.
+p.145: 9 HF X-over control Changes the X-Over point of the reverb from 1 kHz to 20 kHz 
+p.145: 10 HF Decay control Adjusts the length of the high frequency section of the reverb in compression to the rest of the reverb tail.
+p.145: 11 Pre Delay control Controls the amount of delay (in milliseconds) between the initial signal and the onset of reverberation. 
+p.145: 13 Decay control Control that sets the overall (mid-band) reverberation decay time. Range is from 0.5 to 10 seconds, depending on room size.
+p.145: Lower densities give more space between the reverb’s first reflections and subsequent reflections. Higher densities place 
+p.146: Chamber Reverb
+p.146: The chamber reverb emulates the sound of echo chambers found in early recording studios. This is characterized by a rapid buildup of reflection density within a small 
+p.146: frequency decay and cross-over parameters allow relative control over the low band reverb tail length. This can be used to either simulate real room responses, which 
+p.146: due to the natural reverberation of the venue.
+p.146: 4 LF Decay Adjusts the length of the low frequency section of the reverb in compression to the rest of the reverb tail.
+p.146: 5 LF X-over Changes the X-Over point of the reverb from 20 Hz to 500 Hz.
+p.146: 6 HF Damp Dampens the HF to produce a darker sounding reverb. Settings from 1 kHz to 20 kHz.
+p.146: 8 Pre Delay control Controls the amount of delay (in milliseconds) between the initial signal and the onset of reverberation. 
+p.146: 9 Decay control Control that sets the overall (mid-band) reverberation decay time. Range is from 0.5 to 10 seconds, depending on room size.
+p.147: 11 Audition A sample is triggered to test reverb characteristic.
+p.147: 13 Diffusion Control Reducing diffusion creates more discrete echoes, for vocals and other sustained sounds, reduced diffusion can give smooth reverberation that doesn’t overpower the source and maintains clarity.
+p.147: 14 Contour Time control Increases the centre part of the reverbs tail in comparison to the rest of the reverb.
+p.147: 15 Modulation  control To create more variation in reverb sounds, modulation adds subtle changes to the reverb characteristics.
+p.147: 16 POWER button Turns on the Reverb effect. 
+p.147: Hall Reverb
+p.147: The hall reverb simulates the response of a real concert hall adding a sense of space to the source material with less initial density than a chamber reverb. The slower 
+p.147: This effect features contour controls to adjust the envelope shape during the initial portion of the reverb tail and also the time over which the reflection density increases.
+p.147: Low frequency decay and cross-over parameters allow relative control over the low band reverb tail length. This can be used to either simulate real room responses, 
+p.147: present due to the natural reverberation of the venue.
+p.147: 2 Pre Delay control Controls the amount of delay (in milliseconds) between the initial signal and the onset of reverberation. 
+p.147: 4 LF X-over control Changes the X-Over point of the reverb from 20 Hz to 500 Hz.
+p.147: 5 LF Decay control Adjusts the length of the low frequency section of the reverb in compression to the rest of the reverb tail.
+p.147: 7 HF Damp control Dampens the HF to produce a darker sounding reverb. Settings from 1 kHz to 20 kHz.
+p.148: 9 Contour Time Increases the centre part of the reverbs tail in comparison to the rest of the reverb.
+p.148: 10 Contour Env Controls the shape of the envelope for the centre of the reverb
+p.148: 12 Decay control Control that sets the overall (mid-band) reverberation decay time. Range is from 0.5 to 10 seconds, depending on room size.
+p.148: 13 Diffusion  Control Reducing diffusion creates more discrete echoes, for vocals and other sustained sounds, reduced diffusion can give smooth reverberation that doesn’t overpower the source and maintains clarity.
+p.148: 14 Modulation  control To create more variation in reverb sounds, modulation adds subtle changes to the reverb characteristics.
+p.148: 16 Audition A sample is triggered to test reverb characteristic.
+p.148: 17 On button Turns ON the Reverb effect. 
+p.148: Plate Reverb
+p.148: The plate reverb effect simulates the actual plate reverb devices that were used in studios in the 1960s and 1970s. They were literally a plate of metal that was 
+p.148: The plate reverb has a very rapid buildup of reflections and, as a result, is very dense initially with a fairly smooth decay characteristic. For this reason, it is typically the 
+p.148: first reverb choice for percussion instruments.
+p.148: frequency decay and cross-over parameters allow relative control over the low band reverb tail length. This can be used to either simulate real room responses, which 
+p.148: due to the natural reverberation of the venue.
+p.148: 2 Pre Delay control Controls the amount of delay (in milliseconds) between the initial signal and the onset of reverberation. 
+p.148: 4 Decay control Control that sets the overall (mid-band) reverberation decay time. Range is from 0.5 to 10 seconds, depending on room size.
+p.148: 5 Diffusion  Control Reducing diffusion creates more discrete echoes, for vocals and other sustained sounds, reduced diffusion can give smooth reverberation that doesn’t overpower the source and maintains clarity.
+p.148: 6 Modulation  control To create more variation in reverb sounds, modulation adds subtle changes to the reverb characteristics.
+p.148: 9 HF Damp Dampens the HF to produce a darker sounding reverb. Settings from 1 kHz to 20 kHz 
+p.148: 10 LF X-over Changes the X-Over point of the reverb from 20 Hz to 500 Hz
+p.148: 11 LF Decay Adjusts the length of the low frequency section of the reverb in compression to the rest of the reverb tail.
+p.148: 12 Power button Turns ON the Reverb effect. 
+p.149: 14 Audition A sample is triggered to test reverb characteristic.
+p.149: Delays:
+p.149: Midas Delay 
+p.149: The delay effect provides simple delay line effect. Delay times can be specified manually. To use the surface tap button, switch on Use Global and BPM Sync. Around 5 
+p.149: There are two models of delay, Analogue and Digital. The two different effect styles become more apparent when modulation is applied to the delay tail.
+p.149: 4 Range button Selects one of three delay time ranges (1-25 ms, 10-200 ms or 82-1640 ms). Value is displayed immediately below/above button. 
+p.149: 6 Link button Links delay time of left and right channels. 
+p.149: 7 Time Left channel delay time control For entering the desired delay time in ms.
+p.149: 8 Time Right channel delay time control For entering the desired delay time in ms.
+p.149: 11 Feedback control Adjusts the amount of negative/positive feedback applied to delay. Controls the number of repeats. Range is from -100% to +100%. 
+p.149: 13 Mod Depth L & R  in modulation area Adjusts depth of delay modulation. Range is from 0 to 100. 
+p.149: 14 HF Depth in modulation area Adjusts depth of delay modulation. Range is 0 to 100, with 50 at top dead centre.
+p.149: 15 Mod Rate in modulation area Adjusts rate of delay modulation. Range is between 0.001 Hz and 10 Hz.
+p.150: 17 Filtering in filtering area Contains a HF damping control that adjusts the HF attenuation of delay repeats and an LF damping control  that adjusts the LF attenuation of delay repeats. 
+p.150: 19 I/O button Switch for de-activating or bypassing delay. 
+p.150: 21 Model select button Selects digital or analogue delay resolution. Current selection is shown by the illumination of one of the LEDs  (Dig. or Analogue). 
+p.150: Stereo Delay 
+p.150: The Stereo Delay is a simple effect with easily recognisable controls. Tap control function and easily adjusted filters give the Stereo Delay a clean but controlled sound. 
+p.150: It uses less DSP then the Midas Delay and TC2290 which allows two delays to be place in 1 DSP slot.
+p.150: • • With global tap enabled the display shows global tempo regardless of delay time setting.
+p.150: • • With global tap disabled the display shows the equivalent tempo assuming a delay of one beat. For example, if the delay time is 500ms the tempo is calculated as 
+p.150: • • With global tap enabled the display shows current delay (in milliseconds) based on global tempo and selected musical interval. For example, if a 1/8 dot interval is 
+p.150: selected on the delay control and the global tempo is 120 bpm the delay value shown will be 0.75 x 60/120 bpm = 375 ms.
+p.150: • • With global tap disabled the display shows the actual delay time set on the unit.
+p.150: • • Up/down buttons adjust delay units by 1 millisecond increments.
+p.150: If the global tap option is enabled the delay time display will change from seconds (milliseconds) to musical note durations as they do with the current effect’s units. 
+p.151: 4 Delay Time - Display Shows the current delay time in either BPM or ms depending on settings
+p.151: 16 Bypass - Button Bypass the delay, signal still runs through the effect.
+p.151: 18 Feedback - Control Adjusts the amount of negative/positive feedback applied to delay. Controls the number of repeats. Range is from 0% to 100%. 
+p.151: TC 2290 Delay 
+p.151: The TC 2290 is a classic studio and live sound delay unit which is widely viewed as one of the best delay effects ever made.
+p.151: The TC2290 can be inserted directly into an effect slot on a single channel, which passes the entire signal through the effect. In this case, note that the direct input 
+p.151: However, the TC2290 can also be added to an aux bus and one or more channels can send a portion of their signal to this bus to be processed by the effect. The output 
+p.151: of the effect is then mixed back in with the rest of the tracks. This differs from an insert effect in that the TC2290 isn't affecting the track's entire signal, so the direct 
+p.151: The TC2290 can be used both as a mono instance on mono channels and a stereo instance on stereo channels. 
+p.151: The TC 2290 can follow the global tap tempo set from the console. When engaged the Delay Time control adjusts the divide parameter from: 1/16T, 1/16, 1/16 dotted, 
+p.152: This section controls parameters of the modulation effects. Note that the modulation is actually engaged with the MOD buttons located in the PAN, DYN and DELAY 
+p.152: • • Delay time modulations – chorus, flanger, pitch, auto-doubling. 
+p.152: • • Pan position modulations – auto-panning of the direct signal, delay signal, or both. 
+p.152: • • Dynamic modulation – tremolo, delay compressor/expander, ducking and gating. 
+p.152: 2 Delay On - Switch Turns the delay effect on.
+p.152: 11 INV. - Button Pressing the INV button inverts the feedback signal, which may not be noticeable with echo effects, but is more pronounced when applied to modulation such as flanger. 
+p.152: 13 Modulation Delay - Buttton Select Delay modulation (chorus, flanger, pitch, auto-doubling).
+p.152: 14 Pan Modulation - Button Select Pan modulation (auto-panning of the direct signal, delay signal, or both).
+p.152: 15 Dyn. Modulation  - Button Select Dynamic Modulation (delay compressor/expander, ducking and gating).
+p.153: When engaged, the INV DLY MOD button inverts the flanger sweep start and the envelope pitch 
+p.153: shift direction. This only applies to Delay Mod Waveforms ENV and TRIG. (Does not affect Pan or 
+p.153: 29 Pan Delay - Button Pan Delay on. The parameters for each effect are adjusted in the modulation section.
+p.153: The DELAY/DIRECT button determines if the PAN effect is applied to the delay signal only, the direct 
+p.153: signal only, both or neither. This also applies to the static pan set in the plug-in, so if neither DELAY 
+p.153: delay volume when direct volume is suppressed and vice versa. 
+p.153: 33 Time - Display and Rate The main function of this section is to control the delay time. The yellow LED above the display will flash in rhythm with the current tempo, and the exact time in ms will be displayed.
+p.153: 34 Delay Mod - Button Enables modulation of the delay signal.
+p.153: 35 Glob. Tap - Button Follows global tap tempo from the main surface tap button. Tempo divides can be set with the Delay time control
+p.153: 36 Delay Time - Control Adjust the delay time from 0 ms to 9999 ms.
+p.153: 43 Inv. - Button When the Inv delay button is activated, the output of the delay signal is phase inverted. 
+p.153: 44 Deep Mod - Button This disables the automatic modulation depth mapping known as “Golden Ratio”. This makes it possible to do much deeper modulation with wild pitch shifts, but it is somewhat uncontrollable. 
+p.154: The Comp/Limit switch determines whether the effect acts as a compressor or a limiter. The Limit setting uses a much higher compression ratio. Gain affects the input 
+p.155: KT 1176 Limiting Amplifier
+p.155: When Urei released the 1176LN Limiting Amplifier in the late 60s, it broke new ground. The Field Effect Transistors employed had just been invented and the 1176 was 
+p.155: smooth character of the original class-A output stage and its FET’s legendary Fast Attack. Inspired by Urei 1176LN. With an added MIX new sound creation possibiltes 
+p.155: 1 Input control Input - ∞ to 0 dB determines the level of the signal entering the 1176 KT, as well as the threshold. Higher settings will therefore result in increased amounts of limiting or compression
+p.155: Output - ∞ to 0 dB determines the final output level of signal leaving the 1176 KT. Once the desired amount 
+p.155: Sets the amount of time it takes the 1176 KT to respond to an incoming signal and begin gain reduction. 
+p.155: The 1176 KT attack time is adjustable from 20 microseconds to 800 microseconds. The attack time is fastest 
+p.155: Sets the amount of time it takes the 1176LN to return to its initial (pre-gain reduction) level. The 1176LN 
+p.155: The 1176LN Ratio buttons allow four different modes of operation: 
+p.156: KT Bus Compressor
+p.156: twin VCA gain-reduction amplifier design. Cherished by top engineers for its ability to “glue together” tracks, the KT Bus compressor is ideal for gluing IEM mixes or a 
+p.156: G Bus Compressor has an exceptional quality that is optimized for full mixes.
+p.156: excessive gain reduction on bass-heavy audio signal’s without reducing bass content of the audio 
+p.157: R-Comp
+p.157: The R-Comp is a unique Compressor and Limiter which offers both mono operation and true stereo operation from a single set of controls. It's a relatively clean VCA 
+p.159: Smart Dynamics Processor
+p.159: and versatility. In particular, the Smart Dynamics Processor is an intelligent dynamic range processor based on the Midas Channel Compressor and is therefore 
+p.159: The Smart Transient mode is designed to work on the envelope of transient sounds, like drums or slap bass, and modify its different components in order to achieve the 
+p.160: 5 Transient Fader control The Smart Transient mode is designed to work on the envelope of transient sounds, like drums or slap bass, and modify its different components in order to achieve the desired sonic result.
+p.161: Dual De-Esser
+p.161: De-essing is an audio effect designed to reduce the amount of excessive sibilance in an audio signal, usually when dealing with the human voice. The Dual De-Esser 
+p.161: The Lo-Band (around 6k for male or 7k female voices) and Hi-Band (around 11k) controls select which portion of the audio spectrum is affected by the De-Esser on each 
+p.162: DSR De-esser
+p.162: The de-esser is designed to reduce sibilance in human voices, such as excessive presence of S sounds.
+p.162: Due to the special sibilant detection algorithm, the de-esser is completely input level independent. This means that the reduction of sibilants will not change if the 
+p.162: Although the de-esser is primarily designed to be applied on human voices, it can also be used creatively on other instruments.
+p.162: of the de-esser, enabling fine-tuning of the crossover. Note that this happens in place, i.e. the main 
+p.164: PIE (Prime Input Expander)
+p.164:  The Prime Input Expander or PIE for short can greatly increase perceived level of vocals in a busy live mix. It can be used to remove unwanted noise from a stage. 
+p.164: with a width of 1. Then set the depth to -12 and set the threshold so that when the vocalist sings the PIE opens.
+p.165: 1 Slow/Fast button Select the speed at which the PIE reacts to input.
+p.165: 3 Threshold  control Sets the level at which the PIE opens and lets audio pass. - 36 dB to 12.
+p.165: Stressor Compressor
+p.165: The Stressor is a characteristic emulation inspired by a famous modern compressor used on many recordings and in the live sound world. It can be used to tame 
+p.165: aggressive vocals or add pizzazz to flat sounding drums. The Nuke ratio turns the Stressor into a brutish brick wall limiter that will not surrender. 
+p.165: Sidechain HPF and Sidechain EQ further expand the creative use of the stressor by tailoring the frequency response.
+p.165: vocals. A ratio of 10:1 gives a classic 1176 Opto style  compression.
+p.165: 4 Output Control Adjusts the output of the Stressor to control. Use output to make up any gain loss and for comparison tests. Range 1-10.
+p.165: The Side-Chain High Pass Filter cuts low information in the stressors sidechain by choosing the 
+p.166: 12 Active Button Turn the Stressor on. When in active audio will pass un-processed for comparison purposes. 
+p.166: Dual Band & Brickwall limiter.
+p.166: The Dual Band and Brickwall limiters are designed to ensure the output level never exceeds a set limit. They can be used to protect loudspeakers or the output to an in 
+p.166: ear monitor system. The innovative dual band limiters allow the user to limit the low and high bands independently of each other.
+p.166: Tip: Use the Dual Band limiter on a Stereo DJ feed or signal to protect the speaker system from independent High and Low peaks.
+p.166: 3 Input Gain - Control Adjusts the input level to the limiter. -20 dB to 40 dB.
+p.166: 4 Threshold - Control Threshold controls the point at which the limiter begins responding to signal level.
+p.167: 8 Crossover Enable - Switch Engages the crossover for frequency split Dual band limiting. 2x full band limiters in series when The Crossover is disabled. 
+p.167: 10 Power - Switch Turn the limiter off.
+p.167: 12 Input Gain - Control Adjusts the input level to the limiter. -20 dB to 40 dB.
+p.167: The 3-band Compressor effect is a minimum phase shift (analogue style) implementation that guarantees coherent band summing, even at the most extreme 
+p.168: frequency signal’s making it ideal for controlling instruments such as bass guitar. With the highest ratio setting, this mode allows the compressor to effectively be 
+p.168: used as a limiter.
+p.169: responses. The SQ1 can also be used as a frequency-selective De-esser by selecting the narrow bandpass filter response to reduce sibilance or other undesirable 
+p.170:  The Wave Designer is a creative tool for modifying signal transients and dynamics. Use it to make a bass drum sound huge in the mix or level out volume 
+p.170: inconsistencies of slap bass tracks. Adjusting the Attack control can add punch or suppress exceedingly dynamic signals. Increasing the Sustain control acts in a similar 
+p.171: MTEC EQP-HD EQ Program Equalizer
+p.172: MTEC MEQ-HD Mid-Range Equalizer
+p.175: Midas U Flange
+p.175: The flanger effect consists of one or, if configured as stereo, two-tap delay lines. One tap is fixed, and the other tap position is modulated to provide ‘thru-zero’ 
+p.175: 3 Delay control Adjust length of modulated delay line in milliseconds. In ‘thru-zero’ mode, also sets the delay of the dry path. Range is 0.1 to 10, with 5 at top dead centre. 
+p.175: 4 Feedback control Adjusts the amount of negative/positive feedback applied to the delay. Controls the number of repeats. Range is from -100% to +100%, with 0% at top dead centre. 
+p.175: 9 Depth control LFO section control for adjusting the intensity of the effect by setting the depth of modulation as a percentage. Interactive with Delay, as for Chorus. Range is 0% to 100%.
+p.175: 12 Spread control LFO section control for setting the relative phase of left/right modulation. Range is 0 to 180.
+p.175: 14 HF control Damping section control for adjusting the high frequency (kHz) tuning of flanger feedback. Range is 1 kHz to 20 kHz.
+p.175: 15 LF control Damping section control for adjusting the low frequency (kHz) tuning of flanger feedback. Range is 20 Hz to 1 kHz.
+p.175: 18 Power button Switches the flanger effect on and off. Illuminates in red when power is on. 
+p.176: Midas U Phase
+p.176: The phaser effect consists of one, or if configured for dual operation, two stereo phasers connected in serial/parallel according to mode setting. This effect is fabulous 
+p.176: 7 Mode button Selects the operating mode: single; dual series; dual parallel; linked series; or linked parallel. When linked, modulation of phasers 1 and 2 are linked.
+p.176: 11 Spin control Adjusts the amount of relative phase of left/right modulation. Range is from 0% to 100%.
+p.176: 12 Feedback control Adjusts the amount of negative/positive feedback applied to the delay. Controls the number of repeats. Range is from -100% to +100%, with 0% at top dead centre.
+p.176: 16 Power button Switch the Phaser effect on and off. Illuminates red to indicate effect is on.
+p.177: Pitch Shifter
+p.177: The stereo pitch shifting effect is often used in two different ways. One is to set the Mix knob lower and only use the Cent knob to make a small off set in pitch between 
+p.177: this results in a chipmunk sound or a low Darth Vader effect. When the Semi and Cent controls are set at 12 o’clock, the pitch is not altered. Making adjustments by 
+p.177: semitone will have a very pronounced effect, whereas changes to the Cent knob will be very minor. The Delay control creates a time difference between the wet and 
+p.177: dry sound. The HI CUT controls allow the effected signal to be band-limited. The Dual Pitch effect allows the left and right channels to be adjusted independently and 
+p.177: style pitchshifting as the signal is sent back into the effect. As you turn the control CCW more signal is sent back through.
+p.177: 1 Semi control Adjusts the pitch shifting amount in whole tones. Range is from -12 to +12, with 0 at centre. 
+p.177: 2 Cent control Cent tunes the pitch shifting in 1% increments of a whole tone. Range is from -100 to +100, with 0 at top dead centre. 
+p.177: 3 Delay control Sets the delay time before the pitch shift. Range is from 1 ms to 2 s.
+p.177: 6 HF Cut control Adjusts the HF attenuation of delay repeats. Range is from 2k to 20k.
+p.177: 10 Bypass button Switches pitch shifter effect on/off.
+p.177: 11 Feedback control (Vintage mode only) Repeats the pitch shifted effect to add a shimmer type sound.
+p.178: Chorus
+p.178: The chorus effect makes one sound source (such as a voice) sound like many such sources singing (or playing) in unison. Since performance in unison is never precise, 
+p.178: chorus effects simulate this by making independently adjusted duplicates of the input signal and mixing them back in with the original sound. 
+p.178: 6 Medium (Presets) button Standard setting for creating a rich chorus
+p.178: 8 Depth control Affects the depth of the chorus from 0% to 100%.
+p.179: Rotor Motor
+p.180: of the delayed signal. It can also be used to add warmth and width to keyboard or string parts.
+p.180: 2 Time Left Control Adjusts the delay time of the left voice from 1-25 ms.
+p.180: 3 Time Right Control Adjusts the delay time of the right voice from 1-25 ms.
+p.181: Enlightenment Bass
+p.181: The Enlightenment Bass adds rich harmonic content based on the lowest fundamental in order to increase the perception of bass in the mix.
+p.181: Adjust Intensity to around -6dB to start. A small amount of Intensity goes a very long way. Excessively high settings will increase the perceived bass level but may 
+p.181: result in bass distortion!
+p.181: 6 Sub Level - Control Adjusts the amount of sub bass in the signal path.
+p.182: Glow
+p.182: From the depths of Mordor the Glow effect brings intense heat and grit to your sounds. Used on a drum group, Glow can add anything from a dash of saturation and 
+p.182: mix. Turn up the input trim and balance with the output trim to add more harmonics and compression. The Heat preset can be used to add a tube like glow while the 
+p.182: 2 Glow control Controls the amount of glow magma glue being applied. Range 1 - 5.
+p.183: emulate many classic guitar and bass amps. Feeding any Guitar or Bass DI signal into the effect gives great creative scope to control tone. The effect also works on 
+p.184: frequency range. The aim of this effect is to add low end to a signal which may have weaker low frequency content or to generally increase the bass frequencies.
+p.184: The Submonster works particularly well on drum tracks, especially bass drums, and when applied to an overall mix. When placed on individual instruments it can 
+p.184: 2 Tune Control Adjust the target frequency from 20 Hz to 60 Hz. Harmonics are created by generating an additional signal an octave below the selected frequency range.
+p.185: Tape Saturation
+p.185:  As its name suggests, the Tape Saturation effect emulates analogue tape saturation; when the number of magnetised particles required to fully record and reproduce 
+p.185: analogue tape artefacts.
+p.185: An example of this is tape’s tendency to compress the high frequencies in ‘transients’ , or peaks in the audio signal, and while this is a side-effect of using analogue 
+p.185: tape, it can also be desirable when trying to achieve a vintage tape sound. This effect can be altered by use of the Transient Smoothing control. Another way to achieve 
+p.185: that nostalgic tape sound is by the creative use of biasing; most professional tape machines are set up to compensate for this, in other words, to be slightly overbiased. 
+p.185: The Overbias control is used to emulate this by reducing the amount of tape distortion at the expense of the high frequencies and transients. The limit of the high 
+p.185: frequency response is also controlled by the overall frequency response of the tape process, and this in turn is affected mainly by utilising different tape speeds. Slower 
+p.185: tape speeds 3¼ or 7½ ips) have less high frequency definition and a boost at low and mid frequencies, whereas higher speeds (15 / 30 ips) have better high frequency 
+p.185: Another important element to tape emulation is the output transformer which supplies a low end ‘bump’ in the frequency response and increases harmonic distortion 
+p.185: 2 Input Gain control Sets the level into the tape machine.
+p.185: 3 Input Drive control Increases the effect of tape saturation applied.
+p.185: 4 Over bias control Over bias is used to emulate nostalgic tape sound. The Over bias control is used to emulate this by reducing the amount of tape distortion at the expense of the high frequencies and transients
+p.185: 6 Tap Speed button Changes the tape speed. 3¼, 7½, 15 or 30 ips.
+p.186: UNCL.HD MULTIBAND DISTORTION
+p.186: The effect also features a Post Filter section, in case additional control is required over the extra harmonics created by the distortion, and a Cabinet Unit applied to the 
+p.187: 7 Post Filt button The Post Filter section can be used for extra control over the extra harmonics created by the distortion.
+p.187: cabinet types which are: 1 = 8" Tweed. 2 = 4x10" Bass. 3 = 4x10" Custom. 4 = 12" Mid Combo. 5 = 12" 
+p.188: M Harmonics
+p.188: This effect adds rich harmonics to signals. From vintage tones to full on fuzz. Choose a blend of 2nd or 3rd harmonics to add depth to drums or other sources. The Drive 
+p.188: control increases the amount of the effect. The colour allows tonal changes to be made. Turning the colour control CCW increases bass information while turning CW 
+p.188: 6 Harmonics Turn CCW to add 2nd harmonic content. Turn CW to add 3rd harmonic to the signal.
+p.188: 7 Drive Adding drive adds more of the selected harmonics to the signal. From 10% to 100%.

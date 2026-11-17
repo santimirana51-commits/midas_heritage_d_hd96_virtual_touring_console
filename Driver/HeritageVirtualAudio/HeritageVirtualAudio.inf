@@ -1,0 +1,85 @@
+;===============================================================================
+; HeritageVirtualAudio.inf
+; Windows Virtual Audio Driver (PortCls / WaveRT) — 4 Separate Stereo Cable Pairs
+; Based on Microsoft Windows-driver-samples (SYSVAD, MS-PL License)
+;===============================================================================
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = MEDIA
+ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider    = %ProviderName%
+DriverVer   = 11/16/2026,1.0.0.0
+CatalogFile = HeritageVirtualAudio.cat
+PnpLockdown = 1
+
+[SourceDisksNames]
+222 = %DiskName%,,,
+
+[SourceDisksFiles]
+HeritageVirtualAudio.sys = 222
+
+[DestinationDirs]
+HeritageVirtualAudio.CopyList = 13 ; DriverStore
+
+[Manufacturer]
+%MfgName% = HeritageMfg,NTamd64.10.0...17763
+
+[HeritageMfg.NTamd64.10.0...17763]
+%HeritageVirtualAudio.DeviceDesc% = HeritageVirtualAudio_Device, Root\HeritageVirtualAudio
+
+[HeritageVirtualAudio_Device.NT]
+Include    = ks.inf,wdmaudio.inf
+Needs      = KS.Registration, WDMAUDIO.Registration
+CopyFiles  = HeritageVirtualAudio.CopyList
+AddReg     = HeritageVirtualAudio.AddReg
+
+[HeritageVirtualAudio_Device.NT.Services]
+AddService = HeritageVirtualAudio, 0x00000002, HeritageVirtualAudio_Service_Inst
+
+[HeritageVirtualAudio_Service_Inst]
+DisplayName   = %HeritageVirtualAudio.SvcDesc%
+ServiceType   = 1 ; SERVICE_KERNEL_DRIVER
+StartType     = 3 ; SERVICE_DEMAND_START
+ErrorControl  = 1 ; SERVICE_ERROR_NORMAL
+ServiceBinary = %13%\HeritageVirtualAudio.sys
+
+[HeritageVirtualAudio.CopyList]
+HeritageVirtualAudio.sys
+
+;-------------------------------------------------------------------------------
+; 4 Separate Stereo Endpoint Pairs (Render + Capture) for Maximum App Compat
+;-------------------------------------------------------------------------------
+[HeritageVirtualAudio.AddReg]
+HKR,,AssociatedFilters,,"wdmaud,swmidi,redbook"
+HKR,,Driver,,HeritageVirtualAudio.sys
+HKR,Drivers,SubClasses,,"wave,mixer,topology"
+HKR,Drivers\wave\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\mixer\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\topology\wdmaud.drv,Driver,,wdmaud.drv
+
+; Friendly Names for 4 Stereo Render & 4 Stereo Capture Endpoints
+HKR,"FriendlyNames\WaveRender12",,%Cable12RenderName%
+HKR,"FriendlyNames\WaveCapture12",,%Cable12CaptureName%
+HKR,"FriendlyNames\WaveRender34",,%Cable34RenderName%
+HKR,"FriendlyNames\WaveCapture34",,%Cable34CaptureName%
+HKR,"FriendlyNames\WaveRender56",,%Cable56RenderName%
+HKR,"FriendlyNames\WaveCapture56",,%Cable56CaptureName%
+HKR,"FriendlyNames\WaveRender78",,%Cable78RenderName%
+HKR,"FriendlyNames\WaveCapture78",,%Cable78CaptureName%
+
+[Strings]
+ProviderName                    = "OpenLive Audio"
+MfgName                         = "OpenLive Audio"
+DiskName                        = "Heritage Virtual Audio Driver Installation Disk"
+HeritageVirtualAudio.DeviceDesc = "Heritage HD96 Virtual Audio Cable (4x Stereo)"
+HeritageVirtualAudio.SvcDesc    = "Heritage Virtual Audio Driver Service"
+
+Cable12RenderName               = "Heritage Cable 1-2 (Play -> Mixer)"
+Cable12CaptureName              = "Heritage Cable 1-2 (Mixer -> Rec)"
+Cable34RenderName               = "Heritage Cable 3-4 (Play -> Mixer)"
+Cable34CaptureName              = "Heritage Cable 3-4 (Mixer -> Rec)"
+Cable56RenderName               = "Heritage Cable 5-6 (Play -> Mixer)"
+Cable56CaptureName              = "Heritage Cable 5-6 (Mixer -> Rec)"
+Cable78RenderName               = "Heritage Cable 7-8 (Play -> Mixer)"
+Cable78CaptureName              = "Heritage Cable 7-8 (Mixer -> Rec)"

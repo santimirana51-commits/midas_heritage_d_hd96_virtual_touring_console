@@ -1,0 +1,961 @@
+#pragma once
+
+#include "DSP/GravitonDSP.h"
+#include <array>
+#include <cmath>
+#include <algorithm>
+#include <atomic>
+#include <vector>
+#include <numbers>
+
+namespace nova::graviton {
+
+// ==============================================================================
+// Note division table for tempo-synchronized delay
+// ==============================================================================
+enum class NoteDivision : int {
+    Div_1_64 = 0,
+    Div_1_32 = 1,
+    Div_1_16T = 2,
+    Div_1_16 = 3,
+    Div_1_16D = 4,
+    Div_1_8T = 5,
+    Div_1_8 = 6,
+    Div_1_8D = 7,
+    Div_1_4T = 8,
+    Div_1_4 = 9,
+    Div_1_4D = 10,
+    Div_1_2T = 11,
+    Div_1_2 = 12,
+    Div_1_1 = 13,
+    NumDivisions = 14
+};
+
+inline const char* getNoteDivisionName(NoteDivision div) noexcept {
+    switch (div) {
+        case NoteDivision::Div_1_64:  return "1/64";
+        case NoteDivision::Div_1_32:  return "1/32";
+        case NoteDivision::Div_1_16T: return "1/16T";
+        case NoteDivision::Div_1_16:  return "1/16";
+        case NoteDivision::Div_1_16D: return "1/16D";
+        case NoteDivision::Div_1_8T:  return "1/8T";
+        case NoteDivision::Div_1_8:   return "1/8";
+        case NoteDivision::Div_1_8D:  return "1/8D";
+        case NoteDivision::Div_1_4T:  return "1/4T";
+        case NoteDivision::Div_1_4:   return "1/4";
+        case NoteDivision::Div_1_4D:  return "1/4D";
+        case NoteDivision::Div_1_2T:  return "1/2T";
+        case NoteDivision::Div_1_2:   return "1/2";
+        case NoteDivision::Div_1_1:   return "1/1";
+        default: return "1/4";
+    }
+}
+
+// Beats per division (quarter note = 1.0 beat)
+inline double getNoteBeats(NoteDivision div) noexcept {
+    switch (div) {
+        case NoteDivision::Div_1_64:  return 0.0625;
+        case NoteDivision::Div_1_32:  return 0.125;
+        case NoteDivision::Div_1_16T: return 0.25 * (2.0 / 3.0);
+        case NoteDivision::Div_1_16:  return 0.25;
+        case NoteDivision::Div_1_16D: return 0.25 * 1.5;
+        case NoteDivision::Div_1_8T:  return 0.5 * (2.0 / 3.0);
+        case NoteDivision::Div_1_8:   return 0.5;
+        case NoteDivision::Div_1_8D:  return 0.5 * 1.5;
+        case NoteDivision::Div_1_4T:  return 1.0 * (2.0 / 3.0);
+        case NoteDivision::Div_1_4:   return 1.0;
+        case NoteDivision::Div_1_4D:  return 1.0 * 1.5;
+        case NoteDivision::Div_1_2T:  return 2.0 * (2.0 / 3.0);
+        case NoteDivision::Div_1_2:   return 2.0;
+        case NoteDivision::Div_1_1:   return 4.0;
+        default: return 1.0;
+    }
+}
+
+enum class DelayInputSource : int {
+    Left = 0,
+    Right = 1,
+    Sum = 2,
+    Mute = 3
+};
+
+enum class DelayAnalogMode : int {
+    Off = 0,
+    CleanDigital = 1,
+    WarmTape = 2,
+    VintageTube = 3,
+    LoFi = 4
+};
+
+// ==============================================================================
+// Nebula Stereo Tape & Digital Delay Engine
+// Reference: Nebula Audio Stereo Delay Processor & Midas HD96 Delay Section
+// ==============================================================================
+class NebulaStereoDelay final {
+public:
+    static constexpr int kMaxDelaySamples = 288000; // 3.0 seconds @ 96 kHz
+    static constexpr size_t kMaxFilterStages = 4;   // Up to 48 dB/oct (4 cascaded 2nd-order stages)
+
+    NebulaStereoDelay() noexcept {
+        delayBufferL.resize(kMaxDelaySamples, 0.0);
+        delayBufferR.resize(kMaxDelaySamples, 0.0);
+        reset();
+    }
+
+    void reset() noexcept {
+        std::fill(delayBufferL.begin(), delayBufferL.end(), 0.0);
+        std::fill(delayBufferR.begin(), delayBufferR.end(), 0.0);
+        writePos = 0;
+        prevFbSampleL = 0.0;
+        prevFbSampleR = 0.0;
+        wowFlutterPhase = 0.0;
+
+        for (auto& s : hpfStagesL) s.reset();
+        for (auto& s : hpfStagesR) s.reset();
+        for (auto& s : lpfStagesL) s.reset();
+        for (auto& s : lpfStagesR) s.reset();
+
+        meterInL.store(0.0f, std::memory_order_relaxed);
+        meterInR.store(0.0f, std::memory_order_relaxed);
+        meterOutL.store(0.0f, std::memory_order_relaxed);
+        meterOutR.store(0.0f, std::memory_order_relaxed);
+        meterCorrelation.store(1.0f, std::memory_order_relaxed);
+        meterBalance.store(0.0f, std::memory_order_relaxed);
+        clipOccurredIn.store(false, std::memory_order_relaxed);
+        clipOccurredOut.store(false, std::memory_order_relaxed);
+        peakHoldInVal.store(0.0f, std::memory_order_relaxed);
+        peakHoldOutVal.store(0.0f, std::memory_order_relaxed);
+        corrDotSum = corrEnergyL = corrEnergyR = 0.0;
+
+        updateFilters();
+    }
+
+    void setSampleRate(double sr) noexcept {
+        if (sr > 1000.0 && std::abs(sr - sampleRate) > 1.0) {
+            sampleRate = sr;
+            updateFilters();
+        }
+    }
+
+    // ── Global & Sync Controls ─────────────────────────────────────────────
+    void setBpm(double newBpm) noexcept { bpm = std::clamp(newBpm, 20.0, 300.0); }
+    double getBpm() const noexcept { return bpm; }
+
+    void setSyncEnabled(bool sync) noexcept { syncEnabled = sync; }
+    bool getSyncEnabled() const noexcept { return syncEnabled; }
+
+    void setLinked(bool lk) noexcept { linked = lk; }
+    bool getLinked() const noexcept { return linked; }
+
+    void setAnalogMode(DelayAnalogMode mode) noexcept { analogMode = mode; }
+    DelayAnalogMode getAnalogMode() const noexcept { return analogMode; }
+
+    void setFxEnabled(bool on) noexcept { fxEnabled = on; }
+    bool getFxEnabled() const noexcept { return fxEnabled; }
+
+    void setBypass(bool bp) noexcept { bypassed = bp; }
+    bool getBypass() const noexcept { return bypassed; }
+
+    void setInputGainDb(double db) noexcept { inGainDb = std::clamp(db, -24.0, 24.0); }
+    double getInputGainDb() const noexcept { return inGainDb; }
+
+    void setOutputGainDb(double db) noexcept { outGainDb = std::clamp(db, -24.0, 24.0); }
+    double getOutputGainDb() const noexcept { return outGainDb; }
+
+    void resetClip() noexcept {
+        clipOccurredIn.store(false, std::memory_order_relaxed);
+        clipOccurredOut.store(false, std::memory_order_relaxed);
+        peakHoldInVal.store(0.0f, std::memory_order_relaxed);
+        peakHoldOutVal.store(0.0f, std::memory_order_relaxed);
+    }
+    bool hasClipIn() const noexcept { return clipOccurredIn.load(std::memory_order_relaxed); }
+    bool hasClipOut() const noexcept { return clipOccurredOut.load(std::memory_order_relaxed); }
+    float getPeakHoldIn() const noexcept { return peakHoldInVal.load(std::memory_order_relaxed); }
+    float getPeakHoldOut() const noexcept { return peakHoldOutVal.load(std::memory_order_relaxed); }
+    float getStereoCorrelation() const noexcept { return meterCorrelation.load(std::memory_order_relaxed); }
+    float getLrBalance() const noexcept { return meterBalance.load(std::memory_order_relaxed); }
+
+    // ── Preset Definition & Factory Presets ────────────────────────────────
+    struct Preset {
+        const char* name = "Default";
+        const char* description = "Default Clean Delay";
+        bool syncEnabled = true;
+        DelayAnalogMode analogMode = DelayAnalogMode::CleanDigital;
+        // Left
+        DelayInputSource inputSourceL = DelayInputSource::Left;
+        double delayTimeMsL = 131.0;
+        NoteDivision noteDivL = NoteDivision::Div_1_16;
+        double deviationCentsL = 0.0;
+        double hpfHzL = 72.7;
+        double hpfsDbL = 21.3;
+        double lpfHzL = 5800.0;
+        double lpfsDbL = 47.0;
+        double feedbackPctL = 45.0;
+        double crossfeedPctLR = 25.0;
+        bool phaseInvFbL = false;
+        bool phaseInvCrossLR = false;
+        // Right
+        DelayInputSource inputSourceR = DelayInputSource::Right;
+        double delayTimeMsR = 349.0;
+        NoteDivision noteDivR = NoteDivision::Div_1_4;
+        double deviationCentsR = 0.0;
+        double hpfHzR = 72.7;
+        double hpfsDbR = 21.3;
+        double lpfHzR = 5800.0;
+        double lpfsDbR = 47.0;
+        double feedbackPctR = 45.0;
+        double crossfeedPctRL = 25.0;
+        bool phaseInvFbR = false;
+        bool phaseInvCrossRL = false;
+        // Output & Gain
+        double wetLevelPctL = 100.0;
+        double dryLevelPctL = 50.0;
+        double wetPanL = -100.0;
+        double dryPanL = -40.0;
+        double wetLevelPctR = 100.0;
+        double dryLevelPctR = 50.0;
+        double wetPanR = 100.0;
+        double dryPanR = 40.0;
+        double inGainDb = 0.0;
+        double outGainDb = 0.0;
+    };
+
+    static const std::vector<Preset>& getFactoryPresets() noexcept {
+        static const std::vector<Preset> presets = {
+            // 1. Vocal Slap
+            {
+                "Vocal Slap", "Slapback vocal",
+                false, DelayAnalogMode::WarmTape,
+                DelayInputSource::Left, 85.0, NoteDivision::Div_1_32, 0.0,
+                120.0, 18.0, 6000.0, 24.0, 0.0, 0.0, false, false,
+                DelayInputSource::Right, 110.0, NoteDivision::Div_1_16T, 12.0,
+                140.0, 18.0, 5500.0, 24.0, 5.0, 0.0, false, false,
+                60.0, 100.0, -75.0, -30.0, 60.0, 100.0, 75.0, 30.0, 0.0, 0.0
+            },
+            // 2. Vocal Stereo
+            {
+                "Vocal Stereo", "Stereo vocal delay",
+                true, DelayAnalogMode::WarmTape,
+                DelayInputSource::Left, 250.0, NoteDivision::Div_1_8, -10.0,
+                100.0, 18.0, 7000.0, 24.0, 30.0, 15.0, false, false,
+                DelayInputSource::Right, 500.0, NoteDivision::Div_1_4, 12.0,
+                100.0, 18.0, 6500.0, 24.0, 35.0, 15.0, false, false,
+                55.0, 100.0, -100.0, 0.0, 55.0, 100.0, 100.0, 0.0, 0.0, 0.0
+            },
+            // 3. Vocal Wide
+            {
+                "Vocal Wide", "Memperlebar vocal",
+                false, DelayAnalogMode::CleanDigital,
+                DelayInputSource::Left, 23.0, NoteDivision::Div_1_32, -25.0,
+                150.0, 12.0, 8500.0, 18.0, 0.0, 0.0, false, false,
+                DelayInputSource::Right, 37.0, NoteDivision::Div_1_32, 25.0,
+                150.0, 12.0, 8500.0, 18.0, 0.0, 0.0, false, false,
+                75.0, 100.0, -100.0, -20.0, 75.0, 100.0, 100.0, 20.0, 0.0, 0.0
+            },
+            // 4. Ping Pong
+            {
+                "Ping Pong", "Delay bergantian kiri-kanan",
+                true, DelayAnalogMode::CleanDigital,
+                DelayInputSource::Left, 250.0, NoteDivision::Div_1_8, 0.0,
+                90.0, 18.0, 5200.0, 30.0, 10.0, 68.0, false, false,
+                DelayInputSource::Right, 500.0, NoteDivision::Div_1_4, 0.0,
+                90.0, 18.0, 5200.0, 30.0, 10.0, 68.0, false, false,
+                80.0, 80.0, -100.0, 0.0, 80.0, 80.0, 100.0, 0.0, 0.0, 0.0
+            },
+            // 5. Guitar Space
+            {
+                "Guitar Space", "Ruang untuk gitar",
+                true, DelayAnalogMode::VintageTube,
+                DelayInputSource::Left, 375.0, NoteDivision::Div_1_8D, -8.0,
+                150.0, 24.0, 4500.0, 36.0, 42.0, 22.0, false, false,
+                DelayInputSource::Right, 500.0, NoteDivision::Div_1_4, 10.0,
+                180.0, 24.0, 4000.0, 36.0, 45.0, 22.0, false, false,
+                65.0, 90.0, -90.0, -25.0, 65.0, 90.0, 90.0, 25.0, 0.0, 0.0
+            },
+            // 6. Piano Echo
+            {
+                "Piano Echo", "Echo piano",
+                true, DelayAnalogMode::CleanDigital,
+                DelayInputSource::Left, 500.0, NoteDivision::Div_1_4, 0.0,
+                80.0, 12.0, 5000.0, 24.0, 35.0, 18.0, false, false,
+                DelayInputSource::Right, 1000.0, NoteDivision::Div_1_2, 5.0,
+                80.0, 12.0, 4500.0, 24.0, 28.0, 18.0, false, false,
+                45.0, 100.0, -80.0, 0.0, 45.0, 100.0, 80.0, 0.0, 0.0, 0.0
+            },
+            // 7. Synth Movement
+            {
+                "Synth Movement", "Modulasi synthesizer",
+                true, DelayAnalogMode::LoFi,
+                DelayInputSource::Left, 375.0, NoteDivision::Div_1_16D, -55.0,
+                180.0, 24.0, 8000.0, 30.0, 55.0, 35.0, false, false,
+                DelayInputSource::Right, 166.0, NoteDivision::Div_1_8T, 60.0,
+                180.0, 24.0, 7500.0, 30.0, 50.0, 40.0, false, false,
+                80.0, 85.0, -100.0, -15.0, 80.0, 85.0, 100.0, 15.0, 0.0, 0.0
+            },
+            // 8. Ambient Wash
+            {
+                "Ambient Wash", "Delay panjang dan atmosferik",
+                true, DelayAnalogMode::WarmTape,
+                DelayInputSource::Left, 1000.0, NoteDivision::Div_1_2, -15.0,
+                200.0, 24.0, 3200.0, 42.0, 72.0, 45.0, false, false,
+                DelayInputSource::Right, 2000.0, NoteDivision::Div_1_1, 18.0,
+                220.0, 24.0, 2800.0, 42.0, 68.0, 45.0, false, false,
+                90.0, 70.0, -100.0, 0.0, 90.0, 70.0, 100.0, 0.0, 0.0, 0.0
+            },
+            // 9. Chorus Width
+            {
+                "Chorus Width", "Stereo chorus",
+                false, DelayAnalogMode::CleanDigital,
+                DelayInputSource::Left, 18.0, NoteDivision::Div_1_64, -35.0,
+                150.0, 12.0, 9000.0, 18.0, 15.0, 25.0, false, true,
+                DelayInputSource::Right, 24.0, NoteDivision::Div_1_64, 35.0,
+                150.0, 12.0, 9000.0, 18.0, 15.0, 25.0, false, false,
+                70.0, 90.0, -100.0, 0.0, 70.0, 90.0, 100.0, 0.0, 0.0, 0.0
+            },
+            // 10. Flanger Motion
+            {
+                "Flanger Motion", "Efek flanger bergerak",
+                false, DelayAnalogMode::LoFi,
+                DelayInputSource::Left, 4.5, NoteDivision::Div_1_64, -75.0,
+                300.0, 18.0, 10000.0, 24.0, 75.0, 30.0, true, false,
+                DelayInputSource::Right, 6.2, NoteDivision::Div_1_64, 75.0,
+                300.0, 18.0, 10000.0, 24.0, 70.0, 30.0, false, false,
+                75.0, 85.0, -100.0, 0.0, 75.0, 85.0, 100.0, 0.0, 0.0, 0.0
+            }
+        };
+        return presets;
+    }
+
+    void loadPreset(const Preset& p) noexcept {
+        syncEnabled = p.syncEnabled;
+        analogMode = p.analogMode;
+        // Left
+        inputSourceL = p.inputSourceL;
+        delayTimeMsL = p.delayTimeMsL;
+        noteDivL = p.noteDivL;
+        deviationCentsL = p.deviationCentsL;
+        hpfHzL = p.hpfHzL;
+        hpfsDbL = p.hpfsDbL;
+        lpfHzL = p.lpfHzL;
+        lpfsDbL = p.lpfsDbL;
+        feedbackPctL = p.feedbackPctL;
+        crossfeedPctLR = p.crossfeedPctLR;
+        phaseInvFbL = p.phaseInvFbL;
+        phaseInvCrossLR = p.phaseInvCrossLR;
+        // Right
+        inputSourceR = p.inputSourceR;
+        delayTimeMsR = p.delayTimeMsR;
+        noteDivR = p.noteDivR;
+        deviationCentsR = p.deviationCentsR;
+        hpfHzR = p.hpfHzR;
+        hpfsDbR = p.hpfsDbR;
+        lpfHzR = p.lpfHzR;
+        lpfsDbR = p.lpfsDbR;
+        feedbackPctR = p.feedbackPctR;
+        crossfeedPctRL = p.crossfeedPctRL;
+        phaseInvFbR = p.phaseInvFbR;
+        phaseInvCrossRL = p.phaseInvCrossRL;
+        // Output & Gain
+        wetLevelPctL = p.wetLevelPctL;
+        dryLevelPctL = p.dryLevelPctL;
+        wetPanL = p.wetPanL;
+        dryPanL = p.dryPanL;
+        wetLevelPctR = p.wetLevelPctR;
+        dryLevelPctR = p.dryLevelPctR;
+        wetPanR = p.wetPanR;
+        dryPanR = p.dryPanR;
+        inGainDb = p.inGainDb;
+        outGainDb = p.outGainDb;
+
+        updateFilters();
+    }
+
+    Preset getCurrentPreset(const char* name = "Custom") const noexcept {
+        Preset p;
+        p.name = name;
+        p.description = "Current Settings";
+        p.syncEnabled = syncEnabled;
+        p.analogMode = analogMode;
+        p.inputSourceL = inputSourceL;
+        p.delayTimeMsL = delayTimeMsL;
+        p.noteDivL = noteDivL;
+        p.deviationCentsL = deviationCentsL;
+        p.hpfHzL = hpfHzL;
+        p.hpfsDbL = hpfsDbL;
+        p.lpfHzL = lpfHzL;
+        p.lpfsDbL = lpfsDbL;
+        p.feedbackPctL = feedbackPctL;
+        p.crossfeedPctLR = crossfeedPctLR;
+        p.phaseInvFbL = phaseInvFbL;
+        p.phaseInvCrossLR = phaseInvCrossLR;
+
+        p.inputSourceR = inputSourceR;
+        p.delayTimeMsR = delayTimeMsR;
+        p.noteDivR = noteDivR;
+        p.deviationCentsR = deviationCentsR;
+        p.hpfHzR = hpfHzR;
+        p.hpfsDbR = hpfsDbR;
+        p.lpfHzR = lpfHzR;
+        p.lpfsDbR = lpfsDbR;
+        p.feedbackPctR = feedbackPctR;
+        p.crossfeedPctRL = crossfeedPctRL;
+        p.phaseInvFbR = phaseInvFbR;
+        p.phaseInvCrossRL = phaseInvCrossRL;
+
+        p.wetLevelPctL = wetLevelPctL;
+        p.dryLevelPctL = dryLevelPctL;
+        p.wetPanL = wetPanL;
+        p.dryPanL = dryPanL;
+        p.wetLevelPctR = wetLevelPctR;
+        p.dryLevelPctR = dryLevelPctR;
+        p.wetPanR = wetPanR;
+        p.dryPanR = dryPanR;
+        p.inGainDb = inGainDb;
+        p.outGainDb = outGainDb;
+        return p;
+    }
+
+    // ── Left Channel Parameters ────────────────────────────────────────────
+    void setInputSourceL(DelayInputSource src) noexcept { inputSourceL = src; }
+    DelayInputSource getInputSourceL() const noexcept { return inputSourceL; }
+
+    void setDelayTimeMsL(double ms) noexcept {
+        delayTimeMsL = std::clamp(ms, 1.0, 2500.0);
+        if (linked) delayTimeMsR = delayTimeMsL;
+    }
+    double getDelayTimeMsL() const noexcept { return delayTimeMsL; }
+
+    void setNoteDivisionL(NoteDivision div) noexcept {
+        noteDivL = div;
+        if (linked) noteDivR = div;
+    }
+    NoteDivision getNoteDivisionL() const noexcept { return noteDivL; }
+
+    void setDeviationCentsL(double cents) noexcept {
+        deviationCentsL = std::clamp(cents, -100.0, 100.0);
+        if (linked) deviationCentsR = deviationCentsL;
+    }
+    double getDeviationCentsL() const noexcept { return deviationCentsL; }
+
+    void divideTimeL() noexcept {
+        delayTimeMsL = std::max(1.0, delayTimeMsL * 0.5);
+        if (linked) delayTimeMsR = delayTimeMsL;
+    }
+    void multiplyTimeL() noexcept {
+        delayTimeMsL = std::min(2500.0, delayTimeMsL * 2.0);
+        if (linked) delayTimeMsR = delayTimeMsL;
+    }
+
+    void setHpfHzL(double hz) noexcept {
+        hpfHzL = std::clamp(hz, 10.0, 2000.0);
+        if (linked) hpfHzR = hpfHzL;
+        updateFilters();
+    }
+    double getHpfHzL() const noexcept { return hpfHzL; }
+
+    void setHpfsDbL(double slope) noexcept {
+        hpfsDbL = std::clamp(slope, 6.0, 48.0);
+        if (linked) hpfsDbR = hpfsDbL;
+        updateFilters();
+    }
+    double getHpfsDbL() const noexcept { return hpfsDbL; }
+
+    void setLpfHzL(double hz) noexcept {
+        lpfHzL = std::clamp(hz, 500.0, 22000.0);
+        if (linked) lpfHzR = lpfHzL;
+        updateFilters();
+    }
+    double getLpfHzL() const noexcept { return lpfHzL; }
+
+    void setLpfsDbL(double slope) noexcept {
+        lpfsDbL = std::clamp(slope, 6.0, 48.0);
+        if (linked) lpfsDbR = lpfsDbL;
+        updateFilters();
+    }
+    double getLpfsDbL() const noexcept { return lpfsDbL; }
+
+    void setFeedbackL(double pct) noexcept {
+        feedbackPctL = std::clamp(pct, 0.0, 110.0);
+        if (linked) feedbackPctR = feedbackPctL;
+    }
+    double getFeedbackL() const noexcept { return feedbackPctL; }
+
+    void setCrossfeedLR(double pct) noexcept {
+        crossfeedPctLR = std::clamp(pct, 0.0, 100.0);
+        if (linked) crossfeedPctRL = crossfeedPctLR;
+    }
+    double getCrossfeedLR() const noexcept { return crossfeedPctLR; }
+
+    void setPhaseInvertFeedbackL(bool inv) noexcept { phaseInvFbL = inv; }
+    bool getPhaseInvertFeedbackL() const noexcept { return phaseInvFbL; }
+
+    void setPhaseInvertCrossfeedLR(bool inv) noexcept { phaseInvCrossLR = inv; }
+    bool getPhaseInvertCrossfeedLR() const noexcept { return phaseInvCrossLR; }
+
+    // ── Right Channel Parameters ───────────────────────────────────────────
+    void setInputSourceR(DelayInputSource src) noexcept { inputSourceR = src; }
+    DelayInputSource getInputSourceR() const noexcept { return inputSourceR; }
+
+    void setDelayTimeMsR(double ms) noexcept {
+        delayTimeMsR = std::clamp(ms, 1.0, 2500.0);
+        if (linked) delayTimeMsL = delayTimeMsR;
+    }
+    double getDelayTimeMsR() const noexcept { return delayTimeMsR; }
+
+    void setNoteDivisionR(NoteDivision div) noexcept {
+        noteDivR = div;
+        if (linked) noteDivL = div;
+    }
+    NoteDivision getNoteDivisionR() const noexcept { return noteDivR; }
+
+    void setDeviationCentsR(double cents) noexcept {
+        deviationCentsR = std::clamp(cents, -100.0, 100.0);
+        if (linked) deviationCentsL = deviationCentsR;
+    }
+    double getDeviationCentsR() const noexcept { return deviationCentsR; }
+
+    void divideTimeR() noexcept {
+        delayTimeMsR = std::max(1.0, delayTimeMsR * 0.5);
+        if (linked) delayTimeMsL = delayTimeMsR;
+    }
+    void multiplyTimeR() noexcept {
+        delayTimeMsR = std::min(2500.0, delayTimeMsR * 2.0);
+        if (linked) delayTimeMsL = delayTimeMsR;
+    }
+
+    void setHpfHzR(double hz) noexcept {
+        hpfHzR = std::clamp(hz, 10.0, 2000.0);
+        if (linked) hpfHzL = hpfHzR;
+        updateFilters();
+    }
+    double getHpfHzR() const noexcept { return hpfHzR; }
+
+    void setHpfsDbR(double slope) noexcept {
+        hpfsDbR = std::clamp(slope, 6.0, 48.0);
+        if (linked) hpfsDbL = hpfsDbR;
+        updateFilters();
+    }
+    double getHpfsDbR() const noexcept { return hpfsDbR; }
+
+    void setLpfHzR(double hz) noexcept {
+        lpfHzR = std::clamp(hz, 500.0, 22000.0);
+        if (linked) lpfHzL = lpfHzR;
+        updateFilters();
+    }
+    double getLpfHzR() const noexcept { return lpfHzR; }
+
+    void setLpfsDbR(double slope) noexcept {
+        lpfsDbR = std::clamp(slope, 6.0, 48.0);
+        if (linked) lpfsDbL = lpfsDbR;
+        updateFilters();
+    }
+    double getLpfsDbR() const noexcept { return lpfsDbR; }
+
+    void setFeedbackR(double pct) noexcept {
+        feedbackPctR = std::clamp(pct, 0.0, 110.0);
+        if (linked) feedbackPctL = feedbackPctR;
+    }
+    double getFeedbackR() const noexcept { return feedbackPctR; }
+
+    void setCrossfeedRL(double pct) noexcept {
+        crossfeedPctRL = std::clamp(pct, 0.0, 100.0);
+        if (linked) crossfeedPctLR = crossfeedPctRL;
+    }
+    double getCrossfeedRL() const noexcept { return crossfeedPctRL; }
+
+    void setPhaseInvertFeedbackR(bool inv) noexcept { phaseInvFbR = inv; }
+    bool getPhaseInvertFeedbackR() const noexcept { return phaseInvFbR; }
+
+    void setPhaseInvertCrossfeedRL(bool inv) noexcept { phaseInvCrossRL = inv; }
+    bool getPhaseInvertCrossfeedRL() const noexcept { return phaseInvCrossRL; }
+
+    // ── Output Mixer Controls ──────────────────────────────────────────────
+    void setWetLevelL(double pct) noexcept { wetLevelPctL = std::clamp(pct, 0.0, 100.0); }
+    double getWetLevelL() const noexcept { return wetLevelPctL; }
+
+    void setDryLevelL(double pct) noexcept { dryLevelPctL = std::clamp(pct, 0.0, 100.0); }
+    double getDryLevelL() const noexcept { return dryLevelPctL; }
+
+    void setWetPanL(double pan) noexcept { wetPanL = std::clamp(pan, -100.0, 100.0); }
+    double getWetPanL() const noexcept { return wetPanL; }
+
+    void setDryPanL(double pan) noexcept { dryPanL = std::clamp(pan, -100.0, 100.0); }
+    double getDryPanL() const noexcept { return dryPanL; }
+
+    void setWetLevelR(double pct) noexcept { wetLevelPctR = std::clamp(pct, 0.0, 100.0); }
+    double getWetLevelR() const noexcept { return wetLevelPctR; }
+
+    void setDryLevelR(double pct) noexcept { dryLevelPctR = std::clamp(pct, 0.0, 100.0); }
+    double getDryLevelR() const noexcept { return dryLevelPctR; }
+
+    void setWetPanR(double pan) noexcept { wetPanR = std::clamp(pan, -100.0, 100.0); }
+    double getWetPanR() const noexcept { return wetPanR; }
+
+    void setDryPanR(double pan) noexcept { dryPanR = std::clamp(pan, -100.0, 100.0); }
+    double getDryPanR() const noexcept { return dryPanR; }
+
+    // ── Real-Time Meter Readouts ───────────────────────────────────────────
+    float getMeterInL() const noexcept { return meterInL.load(std::memory_order_relaxed); }
+    float getMeterInR() const noexcept { return meterInR.load(std::memory_order_relaxed); }
+    float getMeterOutL() const noexcept { return meterOutL.load(std::memory_order_relaxed); }
+    float getMeterOutR() const noexcept { return meterOutR.load(std::memory_order_relaxed); }
+
+    // ── Audio Processing ───────────────────────────────────────────────────
+    // ── Audio Processing ───────────────────────────────────────────────────
+    void processStereo(double& inOutL, double& inOutR) noexcept {
+        if (bypassed || !fxEnabled) return;
+
+        // Apply Input Gain (-24 dB to +24 dB)
+        const double inGainLin = std::pow(10.0, inGainDb * 0.05);
+        const double dryInL = inOutL * inGainLin;
+        const double dryInR = inOutR * inGainLin;
+
+        // Input Clip Hold Detection (> 0 dBFS)
+        if (std::abs(dryInL) >= 1.0 || std::abs(dryInR) >= 1.0) {
+            clipOccurredIn.store(true, std::memory_order_relaxed);
+        }
+
+        // 1. Input Routing
+        double srcInL = 0.0;
+        switch (inputSourceL) {
+            case DelayInputSource::Left:  srcInL = dryInL; break;
+            case DelayInputSource::Right: srcInL = dryInR; break;
+            case DelayInputSource::Sum:   srcInL = (dryInL + dryInR) * 0.7071; break;
+            case DelayInputSource::Mute:  srcInL = 0.0; break;
+        }
+
+        double srcInR = 0.0;
+        switch (inputSourceR) {
+            case DelayInputSource::Left:  srcInR = dryInL; break;
+            case DelayInputSource::Right: srcInR = dryInR; break;
+            case DelayInputSource::Sum:   srcInR = (dryInL + dryInR) * 0.7071; break;
+            case DelayInputSource::Mute:  srcInR = 0.0; break;
+        }
+
+        // 2. Compute Effective Delay Times (Free ms vs BPM Sync + Deviation Pitch Shift)
+        double effTimeMsL = delayTimeMsL;
+        double effTimeMsR = delayTimeMsR;
+
+        if (syncEnabled) {
+            const double msPerBeat = 60000.0 / std::max(20.0, bpm);
+            effTimeMsL = msPerBeat * getNoteBeats(noteDivL);
+            effTimeMsR = msPerBeat * getNoteBeats(noteDivR);
+        }
+
+        // Micro-timing Deviation in cents: timeFactor = 2^(-cents / 1200)
+        if (std::abs(deviationCentsL) > 0.01) {
+            effTimeMsL *= std::pow(2.0, -deviationCentsL / 1200.0);
+        }
+        if (std::abs(deviationCentsR) > 0.01) {
+            effTimeMsR *= std::pow(2.0, -deviationCentsR / 1200.0);
+        }
+
+        effTimeMsL = std::clamp(effTimeMsL, 1.0, 2500.0);
+        effTimeMsR = std::clamp(effTimeMsR, 1.0, 2500.0);
+
+        // Wow & Flutter modulation for Tape / Tube modes
+        double modOffsetL = 0.0;
+        double modOffsetR = 0.0;
+        if (analogMode == DelayAnalogMode::WarmTape || analogMode == DelayAnalogMode::LoFi) {
+            wowFlutterPhase += 2.0 * std::numbers::pi * 1.8 / sampleRate;
+            if (wowFlutterPhase >= 2.0 * std::numbers::pi) wowFlutterPhase -= 2.0 * std::numbers::pi;
+            const double modAmt = (analogMode == DelayAnalogMode::LoFi) ? 1.5 : 0.6; // ms
+            modOffsetL = std::sin(wowFlutterPhase) * modAmt;
+            modOffsetR = std::cos(wowFlutterPhase * 0.73) * modAmt;
+        }
+
+        const double delaySampL = std::clamp((effTimeMsL + modOffsetL) * 0.001 * sampleRate, 2.0, static_cast<double>(kMaxDelaySamples - 4));
+        const double delaySampR = std::clamp((effTimeMsR + modOffsetR) * 0.001 * sampleRate, 2.0, static_cast<double>(kMaxDelaySamples - 4));
+
+        // 3. Hermite 4-point Interpolated Delay Read
+        auto readCubic = [](const std::vector<double>& buf, int wPos, double dSamp) noexcept -> double {
+            const int dInt = static_cast<int>(dSamp);
+            const double frac = dSamp - static_cast<double>(dInt);
+            const int sz = static_cast<int>(buf.size());
+
+            const int p0 = (wPos - dInt + 1 + sz) % sz;
+            const int p1 = (wPos - dInt + sz) % sz;
+            const int p2 = (wPos - dInt - 1 + sz) % sz;
+            const int p3 = (wPos - dInt - 2 + sz) % sz;
+
+            const double y0 = buf[static_cast<size_t>(p0)];
+            const double y1 = buf[static_cast<size_t>(p1)];
+            const double y2 = buf[static_cast<size_t>(p2)];
+            const double y3 = buf[static_cast<size_t>(p3)];
+
+            // 4-point, 3rd-order Hermite interpolation
+            const double c0 = y1;
+            const double c1 = 0.5 * (y2 - y0);
+            const double c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+            const double c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
+
+            return ((c3 * frac + c2) * frac + c1) * frac + c0;
+        };
+
+        double delayedL = readCubic(delayBufferL, writePos, delaySampL);
+        double delayedR = readCubic(delayBufferR, writePos, delaySampR);
+
+        // 4. Analog Saturation on Delayed Tap
+        if (analogMode == DelayAnalogMode::WarmTape) {
+            delayedL = std::tanh(delayedL * 1.15) * 0.95;
+            delayedR = std::tanh(delayedR * 1.15) * 0.95;
+        } else if (analogMode == DelayAnalogMode::VintageTube) {
+            auto tubeSat = [](double x) noexcept -> double {
+                return (x > 0.0) ? (1.0 - std::exp(-x * 1.2)) : (-1.0 + std::exp(x * 0.9));
+            };
+            delayedL = tubeSat(delayedL);
+            delayedR = tubeSat(delayedR);
+        } else if (analogMode == DelayAnalogMode::LoFi) {
+            delayedL = std::clamp(std::round(delayedL * 128.0) / 128.0, -1.0, 1.0);
+            delayedR = std::clamp(std::round(delayedR * 128.0) / 128.0, -1.0, 1.0);
+        }
+
+        // 5. Multi-Slope Filter Cascade (HPF + LPF)
+        for (size_t i = 0; i < numHpfStagesL; ++i) delayedL = hpfStagesL[i].process(delayedL);
+        for (size_t i = 0; i < numLpfStagesL; ++i) delayedL = lpfStagesL[i].process(delayedL);
+
+        for (size_t i = 0; i < numHpfStagesR; ++i) delayedR = hpfStagesR[i].process(delayedR);
+        for (size_t i = 0; i < numLpfStagesR; ++i) delayedR = lpfStagesR[i].process(delayedR);
+
+        // 6. Feedback & Crossfeed Accumulation
+        const double fbSignL = phaseInvFbL ? -1.0 : 1.0;
+        const double fbSignR = phaseInvFbR ? -1.0 : 1.0;
+        const double crossSignLR = phaseInvCrossLR ? -1.0 : 1.0;
+        const double crossSignRL = phaseInvCrossRL ? -1.0 : 1.0;
+
+        const double fbGainL = (feedbackPctL * 0.01) * fbSignL;
+        const double fbGainR = (feedbackPctR * 0.01) * fbSignR;
+        const double crossGainLR = (crossfeedPctLR * 0.01) * crossSignLR;
+        const double crossGainRL = (crossfeedPctRL * 0.01) * crossSignRL;
+
+        const double nextBufInL = srcInL + (delayedL * fbGainL) + (delayedR * crossGainRL);
+        const double nextBufInR = srcInR + (delayedR * fbGainR) + (delayedL * crossGainLR);
+
+        delayBufferL[static_cast<size_t>(writePos)] = sanitize(nextBufInL);
+        delayBufferR[static_cast<size_t>(writePos)] = sanitize(nextBufInR);
+
+        writePos = (writePos + 1) % kMaxDelaySamples;
+
+        // 7. Stereo Output Mixer Matrix (Wet/Dry and Wet Pan / Dry Pan)
+        auto panGains = [](double panVal, double& gL, double& gR) noexcept {
+            const double norm = std::clamp((panVal + 100.0) * 0.005, 0.0, 1.0);
+            constexpr double halfPi = std::numbers::pi * 0.5;
+            gL = std::cos(norm * halfPi);
+            gR = std::sin(norm * halfPi);
+        };
+
+        double dryPanLL = 1.0, dryPanLR = 0.0;
+        double dryPanRL = 0.0, dryPanRR = 1.0;
+        double wetPanLL = 1.0, wetPanLR = 0.0;
+        double wetPanRL = 0.0, wetPanRR = 1.0;
+
+        panGains(dryPanL, dryPanLL, dryPanLR);
+        panGains(dryPanR, dryPanRL, dryPanRR);
+        panGains(wetPanL, wetPanLL, wetPanLR);
+        panGains(wetPanR, wetPanRL, wetPanRR);
+
+        const double dryL = dryInL * (dryLevelPctL * 0.01);
+        const double dryR = dryInR * (dryLevelPctR * 0.01);
+        const double wetL = delayedL * (wetLevelPctL * 0.01);
+        const double wetR = delayedR * (wetLevelPctR * 0.01);
+
+        const double mixOutL = (dryL * dryPanLL + dryR * dryPanRL) + (wetL * wetPanLL + wetR * wetPanRL);
+        const double mixOutR = (dryL * dryPanLR + dryR * dryPanRR) + (wetL * wetPanLR + wetR * wetPanRR);
+
+        // Apply Output Gain (-24 dB to +24 dB)
+        const double outGainLin = std::pow(10.0, outGainDb * 0.05);
+        inOutL = sanitize(mixOutL * outGainLin);
+        inOutR = sanitize(mixOutR * outGainLin);
+
+        // Output Clip Hold Detection (> 0 dBFS)
+        if (std::abs(inOutL) >= 1.0 || std::abs(inOutR) >= 1.0) {
+            clipOccurredOut.store(true, std::memory_order_relaxed);
+        }
+
+        // 8. Update Atomic Peak Meters & Peak Hold
+        const float inPeakLVal = static_cast<float>(std::abs(dryInL));
+        const float inPeakRVal = static_cast<float>(std::abs(dryInR));
+        const float outPeakLVal = static_cast<float>(std::abs(inOutL));
+        const float outPeakRVal = static_cast<float>(std::abs(inOutR));
+
+        float pInL = meterInL.load(std::memory_order_relaxed);
+        meterInL.store(std::max(inPeakLVal, pInL * 0.999f), std::memory_order_relaxed);
+        float pInR = meterInR.load(std::memory_order_relaxed);
+        meterInR.store(std::max(inPeakRVal, pInR * 0.999f), std::memory_order_relaxed);
+        float pOutL = meterOutL.load(std::memory_order_relaxed);
+        meterOutL.store(std::max(outPeakLVal, pOutL * 0.999f), std::memory_order_relaxed);
+        float pOutR = meterOutR.load(std::memory_order_relaxed);
+        meterOutR.store(std::max(outPeakRVal, pOutR * 0.999f), std::memory_order_relaxed);
+
+        const float maxInNow = std::max(inPeakLVal, inPeakRVal);
+        float phIn = peakHoldInVal.load(std::memory_order_relaxed);
+        if (maxInNow > phIn) peakHoldInVal.store(maxInNow, std::memory_order_relaxed);
+        else peakHoldInVal.store(phIn * 0.9999f, std::memory_order_relaxed);
+
+        const float maxOutNow = std::max(outPeakLVal, outPeakRVal);
+        float phOut = peakHoldOutVal.load(std::memory_order_relaxed);
+        if (maxOutNow > phOut) peakHoldOutVal.store(maxOutNow, std::memory_order_relaxed);
+        else peakHoldOutVal.store(phOut * 0.9999f, std::memory_order_relaxed);
+
+        // 9. Stereo Correlation (-1.0 to +1.0) & L/R Balance
+        corrDotSum = corrDotSum * 0.998 + (inOutL * inOutR) * 0.002;
+        corrEnergyL = corrEnergyL * 0.998 + (inOutL * inOutL) * 0.002;
+        corrEnergyR = corrEnergyR * 0.998 + (inOutR * inOutR) * 0.002;
+        const double denom = std::sqrt(corrEnergyL * corrEnergyR) + 1e-9;
+        const float corr = static_cast<float>(std::clamp(corrDotSum / denom, -1.0, 1.0));
+        meterCorrelation.store(corr, std::memory_order_relaxed);
+
+        const double absL = std::abs(inOutL);
+        const double absR = std::abs(inOutR);
+        const float bal = static_cast<float>(std::clamp((absR - absL) / (absR + absL + 1e-6), -1.0, 1.0));
+        float prevBal = meterBalance.load(std::memory_order_relaxed);
+        meterBalance.store(prevBal * 0.95f + bal * 0.05f, std::memory_order_relaxed);
+    }
+
+private:
+    struct BiquadSection {
+        double b0 = 1.0, b1 = 0.0, b2 = 0.0;
+        double a1 = 0.0, a2 = 0.0;
+        double x1 = 0.0, x2 = 0.0;
+        double y1 = 0.0, y2 = 0.0;
+
+        void reset() noexcept {
+            x1 = x2 = y1 = y2 = 0.0;
+        }
+
+        double process(double in) noexcept {
+            const double out = b0 * in + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = in;
+            y2 = y1; y1 = sanitize(out);
+            return y1;
+        }
+
+        void setCoeffs(double b0_, double b1_, double b2_, double a1_, double a2_) noexcept {
+            b0 = b0_; b1 = b1_; b2 = b2_; a1 = a1_; a2 = a2_;
+        }
+    };
+
+    void updateFilters() noexcept {
+        auto designHPF = [this](double freqHz, double q, BiquadSection& s) {
+            const double w0 = 2.0 * std::numbers::pi * std::clamp(freqHz, 10.0, sampleRate * 0.45) / sampleRate;
+            const double alpha = std::sin(w0) / (2.0 * q);
+            const double cosw0 = std::cos(w0);
+            const double a0 = 1.0 + alpha;
+            s.setCoeffs(((1.0 + cosw0) * 0.5) / a0,
+                        (-(1.0 + cosw0)) / a0,
+                        ((1.0 + cosw0) * 0.5) / a0,
+                        (-2.0 * cosw0) / a0,
+                        (1.0 - alpha) / a0);
+        };
+
+        auto designLPF = [this](double freqHz, double q, BiquadSection& s) {
+            const double w0 = 2.0 * std::numbers::pi * std::clamp(freqHz, 100.0, sampleRate * 0.45) / sampleRate;
+            const double alpha = std::sin(w0) / (2.0 * q);
+            const double cosw0 = std::cos(w0);
+            const double a0 = 1.0 + alpha;
+            s.setCoeffs(((1.0 - cosw0) * 0.5) / a0,
+                        (1.0 - cosw0) / a0,
+                        ((1.0 - cosw0) * 0.5) / a0,
+                        (-2.0 * cosw0) / a0,
+                        (1.0 - alpha) / a0);
+        };
+
+        // Determine number of cascaded stages from dB/oct slope (1 stage = 12 dB/oct, 2 = 24 dB/oct, 3 = 36, 4 = 48)
+        numHpfStagesL = std::clamp(static_cast<size_t>(std::round(hpfsDbL / 12.0)), size_t{1}, kMaxFilterStages);
+        numHpfStagesR = std::clamp(static_cast<size_t>(std::round(hpfsDbR / 12.0)), size_t{1}, kMaxFilterStages);
+        numLpfStagesL = std::clamp(static_cast<size_t>(std::round(lpfsDbL / 12.0)), size_t{1}, kMaxFilterStages);
+        numLpfStagesR = std::clamp(static_cast<size_t>(std::round(lpfsDbR / 12.0)), size_t{1}, kMaxFilterStages);
+
+        for (size_t i = 0; i < kMaxFilterStages; ++i) {
+            designHPF(hpfHzL, 0.7071, hpfStagesL[i]);
+            designHPF(hpfHzR, 0.7071, hpfStagesR[i]);
+            designLPF(lpfHzL, 0.7071, lpfStagesL[i]);
+            designLPF(lpfHzR, 0.7071, lpfStagesR[i]);
+        }
+    }
+
+    double sampleRate = 48000.0;
+    double bpm = 120.0;
+    bool syncEnabled = true;
+    bool linked = false;
+    DelayAnalogMode analogMode = DelayAnalogMode::CleanDigital;
+    bool fxEnabled = true;
+    bool bypassed = false;
+
+    // Left Engine Parameters
+    DelayInputSource inputSourceL = DelayInputSource::Left;
+    double delayTimeMsL = 131.0;
+    NoteDivision noteDivL = NoteDivision::Div_1_16;
+    double deviationCentsL = 79.3;
+    double hpfHzL = 72.7;
+    double hpfsDbL = 21.3;
+    double lpfHzL = 5800.0;
+    double lpfsDbL = 47.0;
+    double feedbackPctL = 55.0;
+    double crossfeedPctLR = 29.0;
+    bool phaseInvFbL = false;
+    bool phaseInvCrossLR = false;
+
+    // Right Engine Parameters
+    DelayInputSource inputSourceR = DelayInputSource::Right;
+    double delayTimeMsR = 349.0;
+    NoteDivision noteDivR = NoteDivision::Div_1_4T;
+    double deviationCentsR = 81.5;
+    double hpfHzR = 33.1;
+    double hpfsDbR = 23.2;
+    double lpfHzR = 4460.0;
+    double lpfsDbR = 37.1;
+    double feedbackPctR = 40.0;
+    double crossfeedPctRL = 19.0;
+    bool phaseInvFbR = false;
+    bool phaseInvCrossRL = false;
+
+    // Output Mixer Parameters
+    double wetLevelPctL = 100.0;
+    double dryLevelPctL = 51.0;
+    double wetPanL = -100.0; // L100
+    double dryPanL = -42.0;  // L42
+
+    double wetLevelPctR = 100.0;
+    double dryLevelPctR = 49.0;
+    double wetPanR = 100.0;  // R100
+    double dryPanR = 42.0;   // R42
+
+    // Buffers & States
+    std::vector<double> delayBufferL;
+    std::vector<double> delayBufferR;
+    int writePos = 0;
+    double prevFbSampleL = 0.0;
+    double prevFbSampleR = 0.0;
+    double wowFlutterPhase = 0.0;
+
+    size_t numHpfStagesL = 2;
+    size_t numHpfStagesR = 2;
+    size_t numLpfStagesL = 4;
+    size_t numLpfStagesR = 3;
+    std::array<BiquadSection, kMaxFilterStages> hpfStagesL;
+    std::array<BiquadSection, kMaxFilterStages> hpfStagesR;
+    std::array<BiquadSection, kMaxFilterStages> lpfStagesL;
+    std::array<BiquadSection, kMaxFilterStages> lpfStagesR;
+
+    // Real-Time Atomic Meters & Telemetry
+    std::atomic<float> meterInL{ 0.0f };
+    std::atomic<float> meterInR{ 0.0f };
+    std::atomic<float> meterOutL{ 0.0f };
+    std::atomic<float> meterOutR{ 0.0f };
+    std::atomic<float> meterCorrelation{ 1.0f };
+    std::atomic<float> meterBalance{ 0.0f };
+    std::atomic<bool>  clipOccurredIn{ false };
+    std::atomic<bool>  clipOccurredOut{ false };
+    std::atomic<float> peakHoldInVal{ 0.0f };
+    std::atomic<float> peakHoldOutVal{ 0.0f };
+
+    double inGainDb = 0.0;
+    double outGainDb = 0.0;
+    double corrDotSum = 0.0;
+    double corrEnergyL = 0.0;
+    double corrEnergyR = 0.0;
+};
+
+} // namespace nova::graviton
+

@@ -1,0 +1,867 @@
+=== CHAPTER 2 (Overview) ===
+--- PAGE 8 ---
+8
+HD96-24-CC -TP User Manual
+HD96-24 Overview
+Chapter 1.  Introduction
+Welcome to the HD96-24 Digital Mixing System. The HD96-24 is a transformation 
+of the Midas live sound experience. Designed for the modern-day live sound 
+engineer without compromise. 
+Designed from the ground up the, HD96-24 system is the first step in a new way 
+of mixing and interacting with a Midas mixing console while keeping the famous 
+no-compromise sonic quality. New forward-thinking ideas including large touch 
+screen using DreamflowTM control, modern multi-touch gesture control with 
+separate widget style areas and the Midas mCloud system to help manage many 
+duties of the HD96-24 system are just a few of the new concepts created to take 
+mixing audio to a new level.  
+To obtain the best results please, read this manual and enjoy the future of mixing 
+with the HD96-24 System.
+About this Manual
+The manual for the HD96-24 is designed to quickly familiarize the user with the 
+console layout, show how to configure and set the system up and then show how 
+to carry out basic functions needed to start mixing audio.
+This document is aimed at professional engineers, such as front of house (FOH) 
+and monitor (MON) engineers, who will be using this equipment in a live sound 
+environment. It is assumed that the reader has previous experience of using 
+professional audio equipment.
+This guide had been designed specifically so that mix engineers and system 
+technicians can go straight to the areas applicable to them, that is operation, 
+connecting and setting up the system. 
+Training 
+The HD96-24 will continue to develop and improve over many years. It is advised 
+to frequently check the www.midasconsoles.com website for up to date videos, 
+user guides and other helpful information.
+HD96-24 user documentation
+To help you find your way around the manual, it has been divided into the 
+following main areas:
+• • Overview: This gives an overview of the HD96-24 System and contains 
+information about this manual.
+• • Getting Started:  This shows you how to set up and power up a 
+HD96-24 System.
+• • Operation of the HD96-24 surface:  This shows you how to use the 
+controls of the surface, navigate its GUI, route (patch) channels & busses, and 
+carry out various operations. 
+• • Description: This gives a detailed description of the HD96-24 hardware, 
+and the controls and their functions on both the control surface and GUI. 
+It provides useful reference material.
+• • Appendices: This provides reference material and technical information 
+about the HD96-24, such as application notes, technical specifications and 
+service information etc.
+System Firmware Version 
+Our team of software engineers are constantly working to improve and expand 
+the features of the HD96-24. It is crucial to have the latest software version 
+installed on your system in order to achieve the best results from your system. 
+Updates can be found in the Midas mCloud, a new approach to track and store 
+system updates.
+Touchscreen
+The high brightness screen improves readability in outdoor situations however 
+the screen should not be exposed to strong direct sunlight. 
+Never operate the screen in strong direct sunlight. The glass and metal surfaces 
+of the console will become uncomfortably hot to touch. Raising internal 
+temperatures. 
+When screen brightness is set high the screen will become warm/hot depending 
+on ambient temperature. Reducing the screen brightness will reduce the screen 
+temperature. 
+Typically, the screen brightness will raise the temperature of the screen’s glass 
+surface by the following amounts:
+• • Typically, at 100% brightness the screen surface is 21C above ambient. 
+• • Typically, at 75% brightness the screen surface is 18C above ambient. 
+• • Typically, at 50% brightness the screen surface is 15C above ambient. 
+• • Typically, at 25% brightness the screen surface is 11C above ambient. 
+• • Typically, at 15% brightness the screen surface is 9C above ambient. 
+(above is with slow fans, office ambient typically 20C) 
+NOTE: A screen brightness of 15% is similar to that of an office monitor or 
+standard laptop. At this brightness (15%) the screen temperature rise is 9C 
+The screen will be hottest at the top and bottom edges (LED locations).
+Warning: The HD96-24 should not be placed or operated in direct sunlight. If the 
+screen is exposed to direct sunlight it may be come unresponsive and too hot to 
+handle. Please ensure you have suitable cover for your console.
+Warranty and Registration
+Midas are world renowned for quality and reliability. This product comes with the 
+standard Midas 10-year warranty.
+Registration of your console is achieved by using the Midas mCloud, a new 
+concept in managing a Digital Mixing System.
+Service and Support
+The HD96-24 is state of the art technology. We provide incredible levels of 
+support and service available via the Midas mCloud or by our care team to give 
+owners and users confidence in Midas products.
+Commonly Used Terms and Definitions
+Below are some of the terms used in this manual. 
+• • GUI – Graphical User Interface or Touchscreen.
+• • Channel – Any input, Output (Aux, Flexi-Aux or  Matrix).
+• • Path – Any Input, Output, VCA or Master.
+• • POPulation Group  – A group of channels used to bring or recall paths to 
+the surface or screen.
+• • Contributions  – Any path that contributes to an output bus.
+• • Touch – The action of pressing the touch screen to turn on or select 
+a function.
+• • Select – The same as touch.
+• • Pinch – Two fingers squeezed together, used to tighten or widen equaliser 
+width (Q).
+• • Swipe – Moving a page left to right or up and down by pressing, holding 
+and moving in the required direction.
+
+--- PAGE 9 ---
+9 HD96-24-CC -TP User Manual
+• • Press and Hold – Either a way to select all the paths on a current page 
+for multiple editing or a way to engage a parameter function that may 
+be critical if press in error, for example flatting the EQ is a press and hold 
+function. 
+• • Widget – The name for a window or various windows displaying 
+information on the GUI as part of a workflow.
+• • Workflow – Visualizes the activities needed to mix audio.
+• • Pot – A physical rotary control used to adjust a level or value. 
+• • Interrogation – Pressing and holding a function to see the parameters 
+associated with that control. 
+Chapter 2.  HD96-24 Overview
+Introducing the HD96-24 Digital 
+Mixing System.
+For decades Midas has been a driving force in the world of pro audio. Building 
+on the incredible success of the XL8 and PRO Series with their exemplary audio 
+performance and road-proven rugged and reliable construction, the Midas PRO 
+Series became the gold standard in concert touring and installed live sound. 
+Offering the same outstanding sample-synchronised and phase-coherent audio 
+performance, interpolated control functions and intuitive navigation, the PRO1, 
+PRO2, PRO3, PRO6, PRO9 and later PRO-X Live Audio Systems have become one of 
+the industry’s main choices for live sound mixing.
+Now the HD96-24 pushes the boundaries further yet again with a 21” touchscreen 
+for hands on instant access to all controls. Parameter adjustment becomes 
+fast and easy with gesture touch interaction using the precise and accurate 
+multi-touch display which allows up to 10 simultaneous touches. Featuring 144 
+Simultaneous inputs and 120 (96 x Flexi Aux + 24 x Matrix) time-aligned and 
+phase-coherent busses with no stealing of resource’s in channel or bus counts. 
+True and consistent 96 kHz sampling frequency and 64-bit floating-point 
+processing provide exemplary quality audio processing, and the oversampled 
+and interpolated digital signal processing algorithms, combined with the fully 
+interpolated and touch sensitive user controls, result in the smooth continuous 
+response and immediacy of working on an analogue console. 
+The HD96-24 features the rugged and road-proven KLARK TEKNIK HyperMAC 
+(HMAC) and SuperMAC (AES50-compliant) networking technologies with their 
+ultra-low and deterministic latencies and robust error correction. Its powerful 
+audio networking offers up to 624 inputs and 654 outputs at the 96kHz sample 
+frequency depending on configuration. 
+The 24 VCA (Variable Control Association) and 24 POP (POPulation) groups, 
+combined with the advanced touch screen navigation system, 28 faders, 
+assignable controls and innovative shortcut area allow simultaneous display 
+and control of all the critical information required to craft an unprecedented 
+mix experience.
+Overview 
+The HD96-24 is a very powerful and flexible audio processing system that 
+provides a complete solution for any audio mixing and signal distribution 
+application in a live sound environment. Common features of the HD96-24 Live 
+Audio System include:
+• • Graviton Audio Engine incorporated into surface
+• • 144 flexi inputs 
+• • 120 busses.
+• • Up to 96 stereo Effects
+• • 96 Ultima Stereo Dynamic EQs
+• • 32 Ultima Stereo Multiband Compressors
+• • 24 VCA (variable control association) groups, and 24 POPulation groups
+• • Variable phase per input channel
+• • Input - Aux - Aux - Matrix routing (Delay compensated)
+• • True 64-bit FPGA processing with GPU coprocessing
+• • 5 tap off points per channel per send, all delay compensated
+• • Dedicated 16 into 12 shout mixer with instant configuration recall
+• • Dual Solo busses featuring duckers and AFL/PFL configurable for input 
+and output
+• • True Audition™ 
+• • True Preview ™
+• • Channel AI™
+• • 21" full colour TFT high brightness display screen with capacitive 
+touch sensing
+• • Advanced and multi-gesture touchscreen user interface
+• • Award-winning Midas microphone preamplifiers
+• • HyperMAC and AES50 networking allows up to 576 inputs and 576 outputs 
+sources @ 96 kHz sample rate
+• • Dual network bridge format converter with up to 128 bidirectional channels 
+and asynchronous sample rate conversion 
+• • Touring grade road case featuring marine grade plywood, aluminium 
+extrusions and composite density protective foam
+• • Integrated Bluetooth and wireless transceiver module
+• • Dual ULTRANET Ports providing 32 additional digital outputs
+• • 28 Midas PRO motorised 100 mm faders
+• • Fully interpolated touch sensitive controls 
+• • Dual redundant auto-ranging universal switch-mode power supplies
+• • 10-Year Warranty Program
+• • Designed and engineered in the UK
+Key features
+New Surface Design
+DreamFlow™ UI
+Full HD multitouch screen - daylight coated
+40 x 18-bit colour 240x240 channel LCDs
+Total configurability, anything anywhere
+36 assignable rotaries
+Full channel control with dedicated 4-band EQ and dynamics section
+Manchino workflow heralds new Era in console setup speed
+Completely customisable surface
+28 faders
+Dante, Madi and USB interfaces available directly in surface with two CM1 slots
+Graviton Audio Engine utilises two HyperMac ports which are configurable for 
+dual redundant or independent operation
+Over 39 Effects to choose from
+
+--- PAGE 10 ---
+10
+HD96-24-CC -TP User Manual
+Including Effects from TC Electronic.
+Tc electronic system 6000 FX (VSS4)
+Tc electronic 2290 (coming soon)
+Tc electronic system 3000 FX (VSS3) 
+KT DN780 Reverb
+HD2a
+HD 670
+K T 1176
+R-Comp 3
+KT Bus compressor
+Mtec EQP-HD 
+Mtec MEQ-HD
+M6 Multiband compressor and dynamic EQ.
+HD Stressor compressor
+HD Wave Designer
+Ultra-Dualistic, Voice Doubler  
+XL4 EQ
+Applications 
+The HD96-24 is the go-to high-end Midas Digital Console System, akin to the 
+‘industry standard’ Heritage 3000 and XL4. Although the HD96-24 is designed for 
+the traditional touring live sound environment, it is also ideal for theatre, house 
+of worship installations and broadcast. So, being a truly multi-functional console 
+in the Midas tradition, the HD96-24 is suitable for many applications, such as:
+• • Live sound touring Front of House (FOH) or Monitors (MONS) duties.
+• • Live sound theatre FOH or MONS duties. 
+• • Live sound & broadcast for house of worship FOH or MONS duties. 
+System Components  
+The HD96-24 surface now brings together all DSP and processing into one place. 
+This allows for quicker set-up. With built in Wi-Fi and Bluetooth the HD96-24 can 
+talk to the mCloud for show file back-up, software updates, fault tracking and 
+even the location of the desk anywhere in the world.
+All the I/O is handled by the familiar Midas Blue DL series rack which combines 
+the warmth and authenticity of analogue circuitry with the precision and agility 
+of state-of-the-art digital techniques. Extreme care has been taken in the 
+planning and execution of the PCB layout to maintain exceptional grounding and 
+analogue/digital separation with the highest quality of sonic performance.
+Compatible DL Series units are:
+DL231/431
+DL251/252
+DL151/152/153/154/155
+The Klark Teknik DN9680 8 Port AES50 extender and multiplexer can be directly 
+connected to the HD96-24 which Extends AES50 connections up to 500m with 
+optical fibre or 100 m with CAT5 cable. DN9680 supports both optical fibre and 
+copper snakes using a Gigabit Ethernet digital audio point-to-point link. A dual-
+fibre Neutrik opticalCON DUO connector is used for optical fibre snake connection, 
+enabling a bidirectional optical link on one multi-mode dual fibre cable 
+The DN9680 acts as a bidirectional multiplexer and demultiplexer and combines 
+the eight incoming AES50 streams into the outgoing snake connection, and 
+simultaneously also takes the incoming snake connection and unbundles the 
+eight AES50 streams and routes them to the corresponding AES50 ports with 
+redundant connections available. This allows 192 bidirectional channels of audio 
+to be used.
+System Busses
+The HD96-24 has comprehensive system busses to suit demanding applications, 
+comprising:
+1. 2 stereo solo busses, routable from all locations and allowing for dual 
+operator 
+2. 3 master busses, routable from the mic/line inputs (up to 144), and 96 aux 
+busses.
+3. 24 matrix busses, routable from the mic/line inputs (up to 144), 96 aux 
+busses and three master busses.
+4. 96 aux busses (either standard or flexi-aux, routable from the mic/line inputs 
+(up to 144) or flexi aux bus to aux bus for group or stem style processing.
+All of the bus routings provide simultaneous and time aligned mixing of all the 
+sources, which will be switchable for minimum latency requirements.
+For monitor mixing, the master, matrix and aux busses can all be routed directly 
+from the input channels, with independent level controls providing up to 123 
+monitor mix busses. Flexi-Aux busses allow group mixing of channels to be sent 
+to Auxes, Matrices or the Masters, for example, mix and process all your drums via 
+a Flexi-Aux then send to an IEM Aux. 
+For traditional FOH group mixing, any (or all) of the aux busses can change to 
+operate post-channel fader and pan (that is, aux gain fixed at unity).
+
+--- PAGE 11 ---
+11 HD96-24-CC -TP User Manual
+Mix matrix 
+Fundamentally, the mix matrix defines the capability of the HD96-24. Probably the best way to imagine the mix matrix is to think of an analogue console layout, where 
+inputs run vertically, and busses run horizontally. A mix matrix is usually defined as the number of busses and the quantity of simultaneously mixable inputs there are 
+per bus. The following diagrams illustrate the capability within the HD96-24 system.
+Processing
+Although the HD96-24 system allows for considerable insertion of external processing, it also embodies ample internal high-quality processing to eliminate the need 
+for this, in the interests of simplicity and reduced overall system size, weight and cost.
+Processing components
+The processing available is:
+• • Up to 144 x 12 or 24dB/Oct. High pass filters.
+• • Up to 144 x 6 or 12dB/Oct. Low pass filters.
+• • Compressor/limiters on every input and output channel with side chain filtering and multiple operating “signatures”.
+• • Up to 144 gates with side chain filtering.
+• • 144 x 4-band parametric input EQ with multiple shelf “modes”.
+• • 123 x up to 4-band parametric output EQ with HPF/LPF modes.
+• • Up to 24 effects processors slots selectable from reverbs, delays, phase shifters, compressors and pitch shifters.
+Input channel processing
+Each of the 144 (maximum) full-function flexi input channels has:
+• • Analogue gain and digital trim.
+• • Polarity reverse switch.
+• • Input delay.
+• • Swept high pass filter with choice of two filter slopes.
+• • Swept low pass filter with choice of two filter slopes.
+
+--- PAGE 12 ---
+12
+HD96-24-CC -TP User Manual
+• • Swept all pass filter with a choice of two options of phase range with low and high optimization.
+• • Frequency-conscious compressor with choice of four compression styles.
+• • Frequency-conscious noise gate with external side chain.
+• • Insert point. (half normalized i.e. the insert send can be used as a channel direct output, even if the insert return isn't switched in).
+• • 4 Band Parametric EQ filter with various filter options.
+• • Routing via level controls to 120 mix busses.
+• • Routing via pan control to left and right master busses.
+• • Routing to mono master bus.
+• • Direct output. Choice of 3 pick-off points, with independent output level/mute.
+• • 3 Slots for FX inserts 
+Mix channel processing
+Each of the auxiliary mix busses has:
+• • Group or Mix mode.
+• • Dual mono or stereo pair modes. Mono, Linked or Stereo where a single fader controls 2 linked adjacent paths.
+• • Up to 4-band PEQ.
+• • Frequency-conscious compressor with choice of four compression styles.
+• • Insert point.
+• • Routing via level controls to the matrix busses.
+• • Routing via pan control to the left, right and mono master busses.
+• • Direct input with independent input level/mute. 
+Output channel processing
+Each of the matrix busses has:
+• • Up to 4-band PEQ.
+• • Four-mode frequency-conscious compressor with soft clip limiter and external side chain.
+• • Insert point.
+• • Direct input.
+Each of the three master output busses has:
+• • Up to 4-band PEQ.
+• • Four-mode frequency-conscious compressor with soft clip limiter and external side chain.
+• • Insert point.
+• • Direct input.
+• • Routing via level controls to the matrix busses.
+Audio Physical Connections
+The maximum total number of physical analogue XLR connections possible on a HD96-24 is 488 plus talk line in and talkback mic in on the rear of the surface. 
+The maximum number of 488 configurable I/O can be increased up to 654 (488 analogue + up to 128 CM1 + 32 ULTRANET + 4 AES3) depending on the combination of 
+different types of I/O card can be used.
+All of the configurable I/O are freely routable on a scene-by-scene basis.
+Network
+The network of the HD96-24 utilises the physical connectivity of Ethernet (EtherCon® connectors and Cat 5e/copper cable) but replaces its data protocol with AES50 
+protocol (implemented as SuperMac) and the HyperMac high capacity system, which are more suited to high quality, low latency audio distribution. The use of the AES 
+standard allows straightforward interfacing with any third-party hardware that also utilises this connection.
+
+--- PAGE 13 ---
+13 HD96-24-CC -TP User Manual
+AES50 connections carry digital audio and control data bi-directionally down a single cable. Cat 5e cable is used for the ‘local’ connections and the dual digital ‘snake’ 
+(equivalent to a 384-channel analogue multi-core, 192 channels per snake connection) between console and I/O. The combination of audio, control, clock and third-
+party Ethernet data in a single network means that the hardware interfaces on a single RJ45 connection.
+All system connections can be duplicated for full dual redundancy.
+mCloud Network
+The Midas mCloud network is a brand-new concept in file and system management. The HD96-24 has built in Wi-Fi capabilities which allow the surface to share its 
+information over a Wi-Fi connection and any other network connections to the mCloud. Be reassured the connection is completely safe with military grade encryption. 
+Great lengths have been taken to keep information secure.
+The mCloud can be used to store your show files, preset files and all other types of data from the console. If you leave your USB stick with your vital settings at home, 
+you can directly log into your mCloud account and load your show file straight to the HD96-24 without breaking into a sweat. 
+New system updates can be downloaded directly to the surface ready for you to update when you’re ready. A list of all previous software versions will be stored on the 
+HD96-24 for peace of mind.
+It also allows audio rental companies to keep a track of registrations, software versions, warranties and diagnostic logs. All the admin for running a busy hire company 
+in one place.
+Each user of the HD96-24 will be prompted to set up a user profile which also in turn configures your mCloud account.
+HD96-24 software
+The operating system of the HD96-24 built on Linux, which is an open-source, stable, proven operating system (OS). Linux is used in many mission-critical applications 
+worldwide and has allowed Midas’ software engineers to write a ground-up system that contains no ‘hidden’ or unused code. This has resulted in an efficient, compact 
+application, which is quick in operation, quick booting and comparatively easy to debug. 
+Graphic User Interface (GUI)
+The HD96-24 has a 21” touch screen that provides a quick and intuitive workflow. Modern touch gestures such as pinch and smooth touch screen faders have been 
+included to speed up workflow and let you concentrate on the mix. Not only does the GUI reflect what is happening on the control surface, but it also provides extra 
+functionality via a top and side bar menu. These menus provide access to all the pages that you will require to set up, configure, manage and operate the entire control 
+surface. 
+Gone are the days of only one touch on a screen at a time. Use both hands to manipulate up to 10 faders at a time if you so wish.  
+Pinch gesture showing EQ width adjustment.
+Independent widget style areas are extensively used to display various different types of information at once, all fully customisable to suit your workflow. 
+System Card Expansion
+The HD96-24 has 2 x CM-1 slots built in for further audio expansion. Adding up to an additional 128 channels
+of I/O greatly increases networked capabilities. Virtual sound checks and recording have never been easier to
+set-up and achieve with flexible options. Being able to support new and emerging protocols via its two
+industry-standard expansion slots give the HD96-24 a greatly extended shelf life.
+
+=== CHAPTER 36 (Specifications) ===
+--- PAGE 303 ---
+303 HD96-24-CC -TP User Manual
+Gate suggestions
+1. Select the Profile you wish to use.
+2. If the instrument has been detected correctly, all the suggestions names and settings will appear in the list depending on instrument detected.
+3. Press Apply to recall the selected preset.
+Kick, Snare and Tom drum mics will have a suggestion called "Natural”; whose settings are fully adaptive. 
+Spill
+Spill (also known as bleed and leakage) is the occurrence in live sound mixing whereby sound is picked up by a microphone from a source other than that which is 
+intended. Spill is usually seen as a problem, and various steps are taken to avoid it or reduce it. In the HD96-24 system the spill LED indicates the quality of the captured 
+profile, i.e. indicates the amount of spill from other instruments. 
+Spill indicator (off = no spill, green = normal spill, yellow = medium spill, red = heavy spill)
+Confidence 
+Confidence is a preference for what is known as the indicator of how sure the system is about the predictions made.  A low confidence profile might, therefore, predict 
+the wrong instruments and hence the associated suggestions will be wrong. 
+Confidence indicator (green = high confidence, yellow = medium confidence, red = low confidence)
+
+--- PAGE 304 ---
+304
+HD96-24-CC -TP User Manual
+Chapter 36.  Specifications
+Processing
+Input processing channels 144 flexi channels
+Output processing channels 96 flexi aux outputs, 24 matrices, 
+stereo bus, mono bus
+Internal effects engines  24 x effects slots (up to 96 effects)
+ 32 x Stereo multiband compressors
+ 96 x Stereo dynamic equalisers
+Point-to-point routing matrix 622 x 652
+Signal processing 64-bit floating point
+D/A converter  24-bit, 96 kHz and 128 times  
+ oversampling 
+A/D converter  24-bit, 96 kHz and 128 times  
+ oversampling 
+Sampling frequency  96 kHz
+I/O latency (surface input to output) 1.34 ms
+Input audio processing  Dual-slope high and low-pass filters
+ True phase filter control 
+ 4-band parametric EQ with  
+ 3 shelf modes
+ 4-mode creative input compressors
+ Input gates or ducker
+ Insert point on/off with processing  
+ order change
+ Direct output with adjustable level  
+ and processing pick of point
+ Delay-compensated aux return mode  
+ on inputs
+ 5 x tap-off points per send
+Output audio  processing  Output 4-band parametric EQ with  
+ shelving/HP/LP options
+ 4-mode creative output dynamics
+ Insert point on/off with  
+ processing order change
+ Direct input with adjustable level  
+ and processing tap-off point
+Mixing control assistance  12 x talk groups
+ 12 x mute groups
+ 24 x surface POPulation groups
+ 24 x VCA associated population  
+ groups
+ Scene snapshot automation
+Connectors
+Midas microphone preamplifier  8 x XLR balanced
+Balanced outputs 8 x XLR balanced
+Talkback connector  1 x XLR balanced
+Talk connector  1 x XLR balanced
+Headphone connector  2 x 1/4" TRS (stereo) 
+Digital AES3 input / output (XLR) 2 / 2
+AES50 ports (Klark Teknik  4 
+SuperMAC, 100 Mbit/s)
+Snake (copper)  2 x HyperMac (192 channels of  
+ bi-directional digital audio) on  
+ Ethercon XLR 
+Snake (fibre)  2 x HyperMac (192 channels of  
+ bi-directional digital audio) on  
+ Opticon XLR 
+CM1 expansion slots 2 x slots (CM1 module for AES50,  
+ DANTE, MADI and USB)
+Ultranet 2 x Ultranet ports (up to 16 digital  
+ outputs per port)
+Word clock IN BNC, accepts TTL level, 96 kHz square  
+ wave, impedance 75 Ohms
+Word clock OUT  BNC, provides a TTL level, 96 kHz  
+ square wave
+AES3 sync IN  1 x 3-pin XLR 
+AES3 sync OUT  1 x 3-pin XLR 
+External (Ethernet) connector  Ethercon XLR 
+Monitor output  2 x HDMI (1920 x 1080p 59.94Hz/60Hz  
+ 16:9 & 720 x 480p 59.94Hz/60Hz  
+ 16:9 supported)
+USB 3.0 type A hub  4 x 5 V ⎓ 900 mA
+USB 3.0  type A 4 x 5 V ⎓ 900 mA  
+(fader port expansion)
+USB 2.0 type A  1 x 5 ⎓ 500 mA 
+(front surface data)   
+Diagnostics Port Serial port
+MIDI  In, Out and Thru 5-pin MIDI  
+ DIN sockets
+Lamp  2 x 12 V DC 5 W 4-pin
+IEC mains socket with power switch 2
+--- PAGE 305 ---
+305 HD96-24-CC -TP User Manual
+Input / Output Characteristics
+Surface input impedance 10 kΩ
+Non-clip maximum input level  +24 dBu
+Input gain -22.5 dB to +65 dB
+Phantom power  +48 V 
+(switchable per input)
+Talk mic impedance 5 kΩ
+Talk mic gain +15 dB to +60 dB
+Talk mic max level +6 dB
+Talkback impendance 20 kΩ
+Talkback gain ∞0 to + 10 dB
+Talkback max level +21 dBu
+Surface output impedance 50 Ω
+Surface output gain  0 dB
+Surface output max level +21 dBu
+Dynamic range  106 dB, 22 Hz to 22 kHz, unweighted 
+Maximum voltage gain  100 dB inputs to subgroups and  
+ masters , 106 dB inputs to aux  
+ and matrix 
+Crosstalk at 1 kHz  -100 dB physically adjacent  
+ input channels 
+Crosstalk at 10 kHz  -90 dB physically adjacent 
+  input channels 
+Fader / pan cut off at 1 kHz  -100 dB 
+Fader / pan cut off at 10 kHz  -100 dB 
+Headphones output impedance  10 Ω
+Headphones maximum  +21 dBu 
+output level
+Displays
+Display screen  21" LCD high brightness  
+ 1920 x 1080 px, captive touchscreen,  
+ up to 10 simultaneous touches
+LCD info displays 41 x full colour LCD info displays,  
+ 24 mm x 24 mm (size), 240 x 240 px 
+Input meters (quantity 30)  12 segment -35 dBu to +20 dBu 
+Output meters (quantity 7)  20 segment -36 dBu to +21 dBu 
+Channel comp meters 5 segment -24 dBu to -1 dBu 
+(quantity 28) 
+Channel gate meters 5 segment -34 dBu to 
+ -5 dBu (quantity 28) 
+Comp meter (quantity 1) 12 segment -23 dBu to -1 dBu
+Gate meter (quantity 1) 12 segment -34 dBu to -1 dBu
+Controls
+100 mm motorized faders 8 + 8 + 8 + 4
+Touch-sensitive rotary controls 66
+Custom controls  
+ Fully assignable rotary controls 28 + 8
+ Fully assignable backlit buttons 28 + 8 + 12
+Headphone controls A and B, min to max 
+Talk Talk gain min to max 
+Wi-Fi
+Antenna    Internal dual-band
+IEEE 802.11 a/b/g/n Supports a / b / g / n devices
+Frequency range 2412-2462 MHz / 5.15–5.850 GHz  
+ operation dependent on region
+Max output power 20 dBm (using 5 GHz range)
+Bluetooth
+Version 4.0 EDR and LE
+Power 20 dBm
+Compatibility Supports GAP , SDN, PAN, SPP , IAP , HFP  
+ 1.5, GATT, ATTR, IAP , A2DP , ACRP .
+Maximum communcation range  30 m typical
+Power
+Switch-mode power supply 2 x auto-ranging 100-240 V  
+ (50/60 Hz)
+Power consumption 2 x 650 W
+Current 9 A max
+Physical
+Operating temperature range  5 °C to 45 °C (41°F – 113°F)
+Storage temperature range  -20 °C to 60 °C  (-4°F – 140°F)
+Dimensions (H x W x D) 352 x 1028 x 719 mm  
+ (13.9 x 40.5 x 28.3")
+Weight  43.2 kg (95.0 lbs)
+--- PAGE 306 ---
+306
+HD96-24-CC -TP User Manual306
+Other important information
+1. Register online.  Please register your new Music  
+Tribe equipment right after you purchase it by visiting 
+musictribe.com. Registering your purchase using our simple 
+online form helps us to process your repair claims more 
+quickly and efficiently. Also, read the terms and conditions 
+of our warranty, if applicable.
+2. Malfunction.  Should your Music Tribe Authorized 
+Reseller not be located in your vicinity, you may contact the 
+Music Tribe Authorized Fulfiller for your country listed under 
+“Support” at musictribe.com. Should your country not be 
+listed, please check if your problem can be dealt with by our 
+“Online Support” which may also be found under “Support” 
+at musictribe.com. Alternatively, please submit an online 
+warranty claim at musictribe.com BEFORE returning the 
+product.
+3. Power Connections.  Before plugging the unit 
+into a power socket, please make sure you are using the 
+correct mains voltage for your particular model. Faulty fuses 
+must be replaced with fuses of the same type and rating 
+without exception.
+1. Registro online. Le recomendamos que registre 
+su nuevo aparato Music  Tribe justo después de su compra 
+accediendo a la página web musictribe.com. El registro de 
+su compra a través de nuestro sencillo sistema online nos 
+ayudará a resolver cualquier incidencia que se presente a la 
+mayor brevedad posible. Además, aproveche para leer los 
+términos y condiciones de nuestra garantía, si es aplicable 
+en su caso.
+2. Averías. En el caso de que no exista un distribuidor 
+Music Tribe en las inmediaciones, puede ponerse en contacto 
+con el distribuidor Music Tribe de su país, que encontrará 
+dentro del apartado “Support” de nuestra página web 
+musictribe.com. En caso de que su país no aparezca en ese 
+listado, acceda a la sección “Online Support” (que también 
+encontrará dentro del apartado “Support” de nuestra 
+página web) y compruebe si su problema aparece descrito y 
+solucionado allí. De forma alternativa, envíenos a través de 
+la página web una solicitud online de soporte en periodo de 
+garantía ANTES de devolvernos el aparato.
+3. Conexiones de corriente.  Antes de enchufar 
+este aparato a una salida de corriente, asegúrese de que dicha 
+salida sea del voltaje adecuado para su modelo concreto. En 
+caso de que deba sustituir un fusible quemado, deberá hacerlo 
+por otro de idénticas especificaciones, sin excepción.
+1. Enregistrez-vous en ligne.  Prenez le 
+temps d’enregistrer votre produit Music  Tribe aussi vite 
+que possible sur le site Internet musictribe.com. Le fait 
+d’enregistrer le produit en ligne nous permet de gérer 
+les réparations plus rapidement et plus efficacement. 
+Prenez également le temps de lire les termes et conditions 
+de notre garantie.
+2. Dysfonctionnement.  Si vous n’avez pas 
+de revendeur Music  Tribe près de chez vous, contactez le 
+distributeur Music  Tribe de votre pays : consultez la liste des 
+distributeurs de votre pays dans la page “Support” de notre 
+site Internet musictribe.com. Si votre pays n’est pas dans la 
+liste, essayez de résoudre votre problème avec notre “aide 
+en ligne” que vous trouverez également dans la section 
+“Support” du site musictribe.com. Vous pouvez également 
+nous faire parvenir directement votre demande de 
+réparation sous garantie par Internet sur le site musictribe.
+com AVANT de nous renvoyer le produit.
+3. Raccordement au secteur.  Avant de relier 
+cet équipement au secteur, assurez-vous que la tension 
+secteur de votre région soit compatible avec l’appareil. 
+Veillez à remplacer les fusibles uniquement par des modèles 
+exactement de même taille et de même valeur électrique 
+— sans aucune exception.
+1. Online registrieren.  Bitte registrieren Sie 
+Ihr neues Music Tribe-Gerät direkt nach dem Kauf auf der 
+website musictribe.com. Wenn Sie Ihren Kauf mit unserem 
+einfachen online Formular registrieren, können wir Ihre 
+Reparaturansprüche schneller und effizienter bearbeiten. 
+Lesen Sie bitte auch unsere Garantiebedingungen, 
+falls zutreffend.
+2. Funktionsfehler.  Sollte sich kein Music  Tribe 
+Händler in Ihrer Nähe befinden, können Sie den Music  Tribe 
+Vertrieb Ihres Landes kontaktieren, der auf musictribe.
+com unter „Support“ aufgeführt ist. Sollte Ihr Land nicht 
+aufgelistet sein, prüfen Sie bitte, ob Ihr Problem von 
+unserem „Online Support“ gelöst werden kann, den Sie 
+ebenfalls auf musictribe.com unter „Support“ finden. 
+Alternativ reichen Sie bitte Ihren Garantieanspruch 
+online auf musictribe.com ein, BEVOR Sie das 
+Produkt zurücksenden.
+3. Stromanschluss.  Bevor Sie das Gerät an 
+eine Netzsteckdose anschließen, prüfen Sie bitte, ob Sie 
+die korrekte Netzspannung für Ihr spezielles Modell 
+verwenden. Fehlerhafte Sicherungen müssen ausnahmslos 
+durch Sicherungen des gleichen Typs und Nennwerts 
+ersetzt werden.
+1. Registre-se online.  Por favor, registre seu novo 
+equipamento Music  Tribe logo após a compra visitando o 
+site musictribe.com Registrar sua compra usando nosso 
+simples formulário online nos ajuda a processar seus 
+pedidos de reparos com maior rapidez e eficiência. Além 
+disso, leia nossos termos e condições de garantia, caso seja 
+necessário.
+2. Funcionamento Defeituoso. 
+Caso seu fornecedor Music  Tribe não esteja localizado 
+nas proximidades, você pode contatar um distribuidor 
+Music Tribe para o seu país listado abaixo de “Suporte” em 
+musictribe.com. Se seu país não estiver na lista, favor checar 
+se seu problema pode ser resolvido com o nosso “Suporte 
+Online” que também pode ser achado abaixo de 
+“Suporte”em musictribe.com. Alternativamente, favor 
+enviar uma solicitação de garantia online em musictribe.
+com ANTES da devolução do produto.
+3. Ligações.  Antes de ligar a unidade à tomada, 
+assegure-se de que está a utilizar a voltagem correcta para 
+o modelo em questão. Os fusíveis com defeito terão de 
+ser substituídos, sem qualquer excepção, por fusíveis do 
+mesmo tipo e corrente nominal.
+1. Registratevi online. Vi invitiamo a registrare 
+il nuovo apparecchio Music Tribe subito dopo averlo 
+acquistato visitando musictribe.com. La registrazione 
+dell'acquisto tramite il nostro semplice modulo online ci 
+consente di elaborare le richieste di riparazione in modo più 
+rapido ed efficiente. Leggete anche i termini e le condizioni 
+della nostra garanzia, qualora applicabile.
+2. Malfunzionamento.  Nel caso in cui il 
+rivenditore autorizzato Music Tribe non si trovi nelle vostre 
+vicinanze, potete contattare il Music Tribe Authorized 
+Fulfiller per il vostro paese, elencato in “Support” 
+@ musictribe.com. Se la vostra nazione non è elencata, 
+controllate se il problema può essere risolto tramite il 
+nostro “Online Support”che può anche essere trovato sotto 
+“Support” @ musictribe.com. In alternativa, inviate una 
+richiesta di garanzia online su musictribe.com PRIMA di 
+restituire il prodotto.
+3. Collegamento all’alimentazione.  Prima 
+di collegare l'unità a una presa di corrente, assicuratevi 
+di utilizzare la tensione di rete corretta per il modello 
+specifico. I fusibili guasti devono essere sostituiti, senza 
+eccezioni, con fusibili dello stesso tipo e valore nominale.
+Important information
+Aspectos importantes
+Informations importantes
+Weitere wichtige 
+Informationen
+Outras Informações 
+Importantes
+Informazioni importanti
+--- PAGE 307 ---
+307 HD96-24-CC -TP User Manual
+1. Registreer online.  Registreer uw nieuwe 
+Music Tribe-apparatuur direct nadat u deze hebt gekocht 
+door naar musictribe.com te gaan. Door uw aankoop 
+te registreren via ons eenvoudige online formulier, 
+kunnen wij uw reparatieclaims sneller en efficiënter 
+verwerken. Lees ook de voorwaarden van onze garantie, 
+indien van toepassing.
+2. Storing. Mocht uw door Music Tribe geautoriseerde 
+wederverkoper niet bij u in de buurt zijn gevestigd, 
+dan kunt u contact opnemen met de door Music Tribe 
+Authorized Fulfiller voor uw land vermeld onder “Support” 
+op musictribe.com. Als uw land niet in de lijst staat, 
+controleer dan of uw probleem kan worden opgelost 
+door onze "Online Support", die u ook kunt vinden onder 
+"Support" op musictribe.com. U kunt ook een online 
+garantieclaim indienen op musictribe.com VOORDAT u het 
+product retourneert.
+3. Stroomaansluitingen.  Voordat u het 
+apparaat op een stopcontact aansluit, moet u ervoor zorgen 
+dat u de juiste netspanning voor uw specifieke model 
+gebruikt. Defecte zekeringen moeten zonder uitzondering 
+worden vervangen door zekeringen van hetzelfde type en 
+dezelfde waarde.
+1. Registrera online.  Registrera din nya Music 
+Tribe-utrustning direkt efter att du köpt den genom 
+att besöka musictribe.com. Att registrera ditt köp med 
+vårt enkla onlineformulär hjälper oss att behandla dina 
+reparationsanspråk snabbare och mer effektivt. Läs också 
+villkoren i vår garanti, om tillämpligt.
+2. Fel. Om din Music Tribe-auktoriserade återförsäljare 
+inte finns i din närhet kan du kontakta Music Tribe 
+Authorized Fulfiller för ditt land listat under “Support” 
+på musictribe.com. Om ditt land inte är listat, kontrollera 
+om ditt problem kan hanteras av vår “Onlinesupport” som 
+också finns under “Support” på musictribe.com. Alternativt 
+kan du skicka in ett online-garantianspråk på musictribe.
+com INNAN du returnerar produkten.
+3. Strömanslutningar.  Innan du ansluter 
+enheten till ett eluttag, se till att du använder rätt 
+nätspänning för just din modell. Felaktiga säkringar 
+måste bytas ut mot säkringar av samma typ och 
+märkning utan undantag.
+1. Zarejestrować online.  Zarejestruj swój nowy 
+sprzęt Music Tribe zaraz po zakupie na stronie musictribe.
+com. Zarejestrowanie zakupu za pomocą naszego prostego 
+formularza online pomaga nam szybciej i efektywniej 
+rozpatrywać roszczenia dotyczące naprawy. Przeczytaj 
+również warunki naszej gwarancji, jeśli dotyczy.
+2. Awaria. Jeśli Twój autoryzowany sprzedawca Music 
+Tribe nie znajduje się w pobliżu, możesz skontaktować się 
+z autoryzowanym dostawcą Music Tribe dla swojego kraju, 
+wymienionym w sekcji „Wsparcie” na stronie musictribe.
+com. Jeśli Twojego kraju nie ma na liście, sprawdź, czy Twój 
+problem może zostać rozwiązany przez nasze „Wsparcie 
+online”, które można również znaleźć w sekcji „Wsparcie” na 
+stronie musictribe.com. Alternatywnie, prześlij zgłoszenie 
+gwarancyjne online na musictribe.com PRZED zwrotem 
+produktu.
+3. Połączenia zasilania.  Przed podłączeniem 
+urządzenia do gniazdka sieciowego upewnij się, że używasz 
+odpowiedniego napięcia sieciowego dla danego modelu. 
+Wadliwe bezpieczniki należy bez wyjątku wymienić na 
+bezpieczniki tego samego typu i wartości.
+1. ヒューズの格納部 / 電圧の選択:  
+ユニットをパワーソケットに接続する
+前に、各モデルに対応した正しい主電
+源を使用していることを確認してくださ
+い。ユニットによっては、230 V と 120 V 
+の 2 つの違うポジションを切り替えて
+使う、ヒューズの格納部を備えているも
+のがあります。正しくない値のヒューズ
+は、絶対に適切な値のヒューズに交換さ
+れている必要があります。
+2. 故障: Music Tribe ディーラーがお客様の
+お近くにないときは、midasconsoles.com の 
+“Support” 内に列記されている、お客様の国
+の Music Tribe ディストリビューターにコン
+タクトすることができます。お 客様の国
+がリストにない場合は、同じ midasconsoles.
+com の “Support” 内にある “Online Support” で
+お客様の問題が処理できないか、チェッ
+クしてみてください。あるいは、商品を
+返送する前に、midasconsoles.com で、オン
+ラインの保証請求を要請してください。
+1. 電源接続: 電源ソケットに電源コー
+ドを接続する前に、本製品に適切な電圧
+を使用していることをご確認ください。
+不具合が発生したヒューズは必ず電圧お
+よび電流、種類が同じヒューズに交換す
+る必要があります。
+1. 在线注册。 请购买 Music Tribe 产品后立即
+在 midasconsoles.com 网站注册。 网页上有简单
+的在线注册表格。 这有助于我们更快更有效
+率地处理您维修等事宜。 请阅读保修的相关
+条款及条件。
+1. 无法正常工作。 若您的 Music Tribe 产品
+无法正常工作, 我们会为您尽快修复。 请联
+系您购买产品的销售商。 若你所在地区没
+有 Music Tribe 销售商, 请联系 midasconsoles.com 
+网站的 “WHERE TO BUY” 一栏下的所列出的子
+公司或经销商。
+1. 电源连接。 将本设备连接电源前, 请确 
+保使用的电压正确。 保险丝需要更换时, 
+必须使用相同型号及定额的保险丝。
+Belangrijke informatie
+Viktig information
+Ważna informacja
+その他の重要な情報
+其他的重要信息
+
+--- PAGE 308 ---
+308
+HD96-24-CC -TP User Manual
+FEDERAL COMMUNICATIONS 
+COMMISSION COMPLIANCE 
+INFORMATION
+Responsible Party Name:  Music Tribe Commercial NV Inc.
+Address: 122 E. 42nd St.1, 
+8th Floor NY, NY 10168, 
+United States
+Email Address: legal@musictribe.com
+FCC ID: QWHFLOW8
+HD96-24-CC-TP
+This equipment has been tested and found to comply with the limits for a Class A 
+digital device, pursuant to part 15 of the FCC Rules. These limits are designed to 
+provide reasonable protection against harmful interference when the equipment 
+is operated in a commercial environment. This equipment generates, uses, and can 
+radiate radio frequency energy and, if not installed and used in accordance with 
+the instruction manual, may cause harmful interference to radio communications. 
+Operation of this equipment in a residential area is likely to cause harmful 
+interference in which case the user will be required to correct the interference at his 
+own expense.
+This device complies with Part 15 of the FCC rules. Operation is subject to the 
+following two conditions:
+(1) this device may not cause harmful interference, and  
+(2) this device must accept any interference received, including interference that may 
+cause undesired operation.
+Warning: Operation of this equipment in a residential environment could cause 
+radio interference.
+Important information:
+Changes or modifications to the equipment not expressly approved by Music Tribe 
+can void the user’s authority to use the equipment.
+Hereby, Music Tribe declares that this product is in compliance with Directive 
+2014/30/EU, Directive 2011/65/EU and Amendment 2015/863/EU, Directive 2012/19/
+EU, Regulation 519/2012 REACH SVHC  and Directive 1907/2006/EC.
+Full text of EU DoC is available at https://community.musictribe.com/
+EU Representative: Music Tribe Brands DK A/S  
+Address: Gammel Strand 44, DK-1202 København K, Denmark
+UK Representative: Music Tribe Brands UK Ltd.  
+Address: 6 Lloyds Avenue, Unit 4CL London EC3N 3AX, United Kingdom
+HD96-24-CC-TP
+Midas
+--- PAGE 309 ---
+309 HD96-24-CC -TP User Manual
+
+--- PAGE 310 ---
+We Hear You
