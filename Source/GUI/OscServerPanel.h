@@ -316,7 +316,7 @@ private:
       const int ch = channelFor(i);
       const auto &state = engine.channels[static_cast<size_t>(ch)];
 
-      const auto &nm = engine.channelNames[static_cast<size_t>(ch)];
+      const auto nm = engine.getChannelName(ch);
       s.name.setText(nm.isNotEmpty() ? nm : ("CH " + juce::String(ch + 1)),
                      juce::dontSendNotification);
 
