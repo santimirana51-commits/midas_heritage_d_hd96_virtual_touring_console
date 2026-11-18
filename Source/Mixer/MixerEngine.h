@@ -397,7 +397,7 @@ public:
   double oscGainSmooth = 0.0;
   // Phase 72: Input Delay Line (max 500 ms @ 96 kHz = 48000 samples)
   static constexpr int kMaxDelaySamples = NOVA_MAX_DELAY_MS * 96;
-  int maxDelaySamples = maxDelaySamples;
+  int maxDelaySamples = kMaxDelaySamples;
   std::vector<std::vector<double>> channelDelayBuffers;
   std::array<int, kLogicalChannels> channelDelayWritePos{};
   // Phase 75: Dual Solo Bus Architecture (Solo A & Solo B) & Monitor Section
