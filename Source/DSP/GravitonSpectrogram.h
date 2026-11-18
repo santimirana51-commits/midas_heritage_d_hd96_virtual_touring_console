@@ -21,13 +21,15 @@
 
 #include <juce_core/juce_core.h>
 #include <cmath>
+#include <atomic>
+#include <cstdint>
 #include <vector>
 #include <array>
 #include <complex>
 #include <algorithm>
 #include <deque>
-#include <mutex>
 #include <numeric>
+#include <utility>
 
 namespace nova {
 
