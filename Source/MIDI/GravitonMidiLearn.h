@@ -446,7 +446,7 @@ public:
     int addMapping(const MidiMapping& m, int groupIdx = -1) {
         std::lock_guard<std::mutex> lock(mutex_);
         int gi = (groupIdx >= 0) ? groupIdx : activeGroup_;
-        if (gi >= (int)groups_.size()) return -1;
+        if (gi < 0 || gi >= static_cast<int>(groups_.size())) return -1;
         auto& g = groups_[gi];
         if ((int)g.mappings.size() >= MAX_MAPPINGS) return -1;
         MidiMapping nm = m;
