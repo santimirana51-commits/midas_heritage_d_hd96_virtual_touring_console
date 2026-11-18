@@ -174,6 +174,21 @@ public:
   // & 31)
   nova::graviton::StageBoxPatchMatrix stageBoxPatchMatrix;
   std::array<juce::String, kLogicalChannels> channelNames{};
+  mutable juce::CriticalSection channelNameLock;
+
+  juce::String getChannelName(int channelIndex) const {
+    if (channelIndex < 0 || channelIndex >= kLogicalChannels)
+      return {};
+    const juce::ScopedLock lock(channelNameLock);
+    return channelNames[static_cast<size_t>(channelIndex)];
+  }
+
+  void setChannelName(int channelIndex, const juce::String &value) {
+    if (channelIndex < 0 || channelIndex >= kLogicalChannels)
+      return;
+    const juce::ScopedLock lock(channelNameLock);
+    channelNames[static_cast<size_t>(channelIndex)] = value;
+  }
   std::array<double, nova::graviton::StageBoxPatchMatrix::kTotalOutputPorts>
       stageBoxOutputSamples{};
   // Phase 85: Multichannel Surround & Immersive Panning 5.1 / 7.1 / LCR &
@@ -270,7 +285,7 @@ public:
                              std::memory_order_relaxed);
         } else if ((sub == "config/name" || sub == "name") &&
                    !msg.stringArgs.empty()) {
-          channelNames[cIdx] = juce::String(msg.stringArgs[0]);
+          setChannelName(static_cast<int>(cIdx), juce::String(msg.stringArgs[0]));
         }
       }
     } else if (msg.address == "/main/fader" && !msg.floatArgs.empty()) {
