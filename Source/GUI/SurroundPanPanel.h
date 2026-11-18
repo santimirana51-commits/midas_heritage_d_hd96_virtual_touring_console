@@ -320,7 +320,7 @@ private:
     const int ch = getSelectedChannel();
     const auto &cState = engine.channels[static_cast<size_t>(ch)];
 
-    const auto cName = engine.channelNames[static_cast<size_t>(ch)];
+    const auto cName = engine.getChannelName(ch);
     channelNameLabel.setText(cName.isEmpty() ? ("CH " + juce::String(ch + 1))
                                              : cName,
                              juce::dontSendNotification);
