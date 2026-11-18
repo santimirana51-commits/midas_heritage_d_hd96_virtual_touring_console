@@ -171,47 +171,71 @@ public:
     }
     
     // ── Get Current Magnitude (smoothed, weighted) ──
-    const std::vector<float>& getMagnitudeDB() const { return magnitudeDB_; }
-    const std::vector<float>& getPhase() const { return phase_; }
-    const std::vector<float>& getPeakHold() const { return peakHold_; }
-    
+    // UI-facing getters return copies. The producer never waits for a reader.
+    std::vector<float> getMagnitudeDB() const { return copyPublished(publishedMagnitudeDB_); }
+    std::vector<float> getPhase() const { return copyPublished(publishedPhase_); }
+    std::vector<float> getPeakHold() const { return copyPublished(publishedPeakHold_); }
+
     // ── Waterfall History ──
     int getHistoryDepth() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return (int)history_.size();
+        return static_cast<int>(std::min<uint64_t>(
+            historyPublishedCount_.load(std::memory_order_acquire), MAX_HISTORY));
     }
-    
+
     FFTFrame getHistoryFrame(int idx) const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (idx >= 0 && idx < (int)history_.size()) return history_[idx];
-        return {};
+        const uint64_t published = historyPublishedCount_.load(std::memory_order_acquire);
+        const uint64_t depth = std::min<uint64_t>(published, MAX_HISTORY);
+        if (idx < 0 || static_cast<uint64_t>(idx) >= depth)
+            return {};
+        const uint64_t sequence = published - depth + static_cast<uint64_t>(idx) + 1;
+        auto &slot = historyFrames_[static_cast<size_t>((sequence - 1) % MAX_HISTORY)];
+        int expected = 0;
+        if (!slot.state.compare_exchange_strong(expected, 2, std::memory_order_acquire))
+            return {};
+        FFTFrame copy;
+        if (slot.sequence.load(std::memory_order_acquire) == sequence)
+            copy = slot.frame;
+        slot.state.store(0, std::memory_order_release);
+        return copy;
     }
-    
-    const std::deque<FFTFrame>& getHistory() const { return history_; }
+
+    std::deque<FFTFrame> getHistory() const {
+        std::deque<FFTFrame> snapshot;
+        const int depth = getHistoryDepth();
+        for (int i = 0; i < depth; ++i) {
+            auto frame = getHistoryFrame(i);
+            if (!frame.magnitudeDB.empty())
+                snapshot.push_back(std::move(frame));
+        }
+        return snapshot;
+    }
     
     // ── Frequency for bin ──
     float binToFreq(int bin) const {
-        return static_cast<float>(bin) * static_cast<float>(sampleRate_) / static_cast<float>(fftSize_);
+        return static_cast<float>(bin) * static_cast<float>(sampleRate_.load(std::memory_order_relaxed)) / static_cast<float>(fftSize_);
     }
     
     int freqToBin(float freq) const {
-        return static_cast<int>(freq * static_cast<float>(fftSize_) / static_cast<float>(sampleRate_));
+        return static_cast<int>(freq * static_cast<float>(fftSize_) / static_cast<float>(sampleRate_.load(std::memory_order_relaxed)));
     }
     
     // ── Statistics ──
-    float getCurrentPeakFreq() const { return currentPeakFreq_; }
-    float getCurrentPeakDB() const { return currentPeakDB_; }
-    float getCurrentRMSdB() const { return currentRMSdB_; }
-    int getFrameCount() const { return frameCount_; }
+    float getCurrentPeakFreq() const { return currentPeakFreq_.load(std::memory_order_relaxed); }
+    float getCurrentPeakDB() const { return currentPeakDB_.load(std::memory_order_relaxed); }
+    float getCurrentRMSdB() const { return currentRMSdB_.load(std::memory_order_relaxed); }
+    int getFrameCount() const { return frameCount_.load(std::memory_order_relaxed); }
     
     // ── Export ──
     juce::String exportCSV() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        const auto magnitude = getMagnitudeDB();
+        const auto phase = getPhase();
         juce::String csv = "Frequency_Hz,Magnitude_dB,Phase_rad\n";
-        for (int i = 0; i < halfSize_; ++i) {
+        const int bins = std::min(static_cast<int>(magnitude.size()),
+                                  static_cast<int>(phase.size()));
+        for (int i = 0; i < bins; ++i) {
             csv += juce::String(binToFreq(i), 2) + ","
-                 + juce::String(magnitudeDB_[i], 2) + ","
-                 + juce::String(phase_[i], 4) + "\n";
+                 + juce::String(magnitude[static_cast<size_t>(i)], 2) + ","
+                 + juce::String(phase[static_cast<size_t>(i)], 4) + "\n";
         }
         return csv;
     }
