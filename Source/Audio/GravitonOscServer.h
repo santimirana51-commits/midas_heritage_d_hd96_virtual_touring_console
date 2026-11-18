@@ -219,7 +219,7 @@ public:
         clean.reserve(addresses.size());
         for (auto address : addresses) {
             address = address.trim();
-            if (address.isNotEmpty() && !clean.contains(address))
+            if (address.isNotEmpty() && std::find(clean.begin(), clean.end(), address) == clean.end())
                 clean.push_back(address);
         }
         const juce::ScopedLock sl(clientLock);
@@ -345,7 +345,7 @@ public:
                 bool senderAllowed = false;
                 {
                     const juce::ScopedLock sl(clientLock);
-                    senderAllowed = allowedAddresses.contains(senderIp);
+                    senderAllowed = std::find(allowedAddresses.begin(), allowedAddresses.end(), senderIp) != allowedAddresses.end();
                 }
                 if (!senderAllowed)
                     continue;
