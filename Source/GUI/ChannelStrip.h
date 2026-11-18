@@ -13,7 +13,7 @@ public:
                MixerEngine &engineRef)
       : channelIndex(index), channel(state), faderMode(faderModeRef),
         engine(engineRef), meter(state.peak) {
-    const auto chName = engine.channelNames[static_cast<size_t>(index)];
+    const auto chName = engine.getChannelName(index);
     name.setText(chName.isEmpty() ? ("CH " + juce::String(index + 1)) : chName,
                  juce::dontSendNotification);
     name.setJustificationType(juce::Justification::centred);
@@ -21,7 +21,7 @@ public:
     name.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
     name.setEditable(true);
     name.onTextChange = [this] {
-      engine.channelNames[static_cast<size_t>(channelIndex)] = name.getText();
+      engine.setChannelName(channelIndex, name.getText());
     };
     addAndMakeVisible(name);
 
@@ -309,7 +309,7 @@ public:
     pan.setTextValueSuffix(isLinked ? " BAL" : " PAN");
     pan.setValue(channel.pan.load(std::memory_order_relaxed),
                  juce::dontSendNotification);
-    const auto chName = engine.channelNames[static_cast<size_t>(channelIndex)];
+    const auto chName = engine.getChannelName(channelIndex);
     const auto expectedLabel =
         chName.isEmpty() ? ("CH " + juce::String(channelIndex + 1)) : chName;
     if (name.getText() != expectedLabel && !name.isBeingEdited()) {
