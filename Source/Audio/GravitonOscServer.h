@@ -54,8 +54,9 @@ public:
         if (addrEnd >= size) return false;
         out.address.assign(reinterpret_cast<const char*>(data + offset), addrEnd - offset);
         offset = padTo4(addrEnd + 1);
+        if (offset > size) return false;
 
-        if (offset >= size) return true; // Message with address only is valid
+        if (offset == size) return true; // Message with address only is valid
 
         // 2. Read Type Tags String
         if (data[offset] != ',')
@@ -68,6 +69,7 @@ public:
         if (tagEnd >= size) return false;
         out.typeTags.assign(reinterpret_cast<const char*>(data + offset + 1), tagEnd - (offset + 1));
         offset = padTo4(tagEnd + 1);
+        if (offset > size) return false;
 
         // 3. Read Arguments according to Type Tags
         for (char tag : out.typeTags) {
@@ -86,10 +88,14 @@ public:
                 }
                 case 'i': {
                     if (offset + 4 > size) return false;
-                    int32_t val = (static_cast<int32_t>(data[offset]) << 24) |
-                                  (static_cast<int32_t>(data[offset + 1]) << 16) |
-                                  (static_cast<int32_t>(data[offset + 2]) << 8) |
-                                  static_cast<int32_t>(data[offset + 3]);
+                    const uint32_t bits =
+                        (static_cast<uint32_t>(data[offset]) << 24) |
+                        (static_cast<uint32_t>(data[offset + 1]) << 16) |
+                        (static_cast<uint32_t>(data[offset + 2]) << 8) |
+                        static_cast<uint32_t>(data[offset + 3]);
+                    int32_t val = 0;
+                    static_assert(sizeof(val) == sizeof(bits));
+                    std::memcpy(&val, &bits, sizeof(val));
                     out.intArgs.push_back(val);
                     offset += 4;
                     break;
@@ -105,9 +111,17 @@ public:
                     offset = padTo4(sEnd + 1);
                     break;
                 }
-                default:
-                    // Unsupported or ignore
+                // OSC type tags without payload (OSC 1.0).
+                case 'T':
+                case 'F':
+                case 'N':
+                case 'I':
                     break;
+                default:
+                    // Unknown tags have unknown payload sizes; reject rather than
+                    // silently desynchronizing the remaining argument stream.
+                    out.clear();
+                    return false;
             }
         }
 
