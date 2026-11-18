@@ -397,6 +397,14 @@ public:
   double oscGainSmooth = 0.0;
   // Phase 72: Input Delay Line (max 500 ms @ 96 kHz = 48000 samples)
   static constexpr int kMaxDelaySamples = NOVA_MAX_DELAY_MS * 96;
+  static int calculateMaxDelaySamples(double sampleRateHz) noexcept {
+    if (!std::isfinite(sampleRateHz) || sampleRateHz <= 0.0)
+      return 1;
+    const double samples =
+        std::ceil(sampleRateHz * static_cast<double>(NOVA_MAX_DELAY_MS) / 1000.0);
+    return static_cast<int>(std::clamp(
+        samples, 1.0, static_cast<double>(std::numeric_limits<int>::max())));
+  }
   int maxDelaySamples = kMaxDelaySamples;
   std::vector<std::vector<double>> channelDelayBuffers;
   std::array<int, kLogicalChannels> channelDelayWritePos{};
@@ -1193,10 +1201,7 @@ public:
     // This callback runs before processBlock resumes. Resize here, never from
     // the real-time audio callback, so the configured delay remains accurate
     // at 44.1/48/88.2/96/176.4/192 kHz and other supported rates.
-    maxDelaySamples = juce::jmax(
-        1, static_cast<int>(std::ceil(
-               deviceSampleRate * static_cast<double>(NOVA_MAX_DELAY_MS) /
-               1000.0)));
+    maxDelaySamples = calculateMaxDelaySamples(deviceSampleRate);
     for (auto &buffer : channelDelayBuffers)
       buffer.assign(static_cast<size_t>(maxDelaySamples), 0.0);
     channelDelayWritePos.fill(0);
