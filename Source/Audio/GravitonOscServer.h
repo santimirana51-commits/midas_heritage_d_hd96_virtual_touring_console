@@ -224,6 +224,11 @@ public:
         }
         const juce::ScopedLock sl(clientLock);
         allowedAddresses = std::move(clean);
+        // Existing UDP peers must not remain broadcast targets after trust is
+        // revoked or the allowlist is replaced.
+        registeredClients.clear();
+        lastClientIp.clear();
+        lastClientPort = 0;
     }
 
     std::vector<juce::String> getAllowedAddresses() const {
