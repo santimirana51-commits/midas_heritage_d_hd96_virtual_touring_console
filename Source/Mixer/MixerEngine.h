@@ -209,6 +209,15 @@ public:
                         const juce::String &clientIp, int clientPort) {
     logOsc("RX: " + msg.address + " (" + msg.typeTags + ")");
 
+    // Reject non-finite numeric input before clamping or publishing DSP controls.
+    // std::clamp does not sanitize NaN because all comparisons with NaN are false.
+    for (const float value : msg.floatArgs) {
+      if (!std::isfinite(value)) {
+        logOsc("DROP: non-finite OSC float");
+        return;
+      }
+    }
+
     // /ch/{id}/mix/fader [float] or /ch/{id}/fader [float]
     if (msg.address.rfind("/ch/", 0) == 0) {
       int chNum = 0;
