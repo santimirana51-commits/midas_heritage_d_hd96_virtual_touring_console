@@ -1,4 +1,8 @@
 #pragma once
+
+#ifndef NOVA_MAX_DELAY_MS
+#define NOVA_MAX_DELAY_MS 500
+#endif
 #include "Audio/AudioBufferOps.h"
 #include "Audio/GainSmoothing.h"
 #include "Audio/GravitonASIOStreamer.h"
@@ -392,7 +396,7 @@ public:
   nova::graviton::SignalGenerator signalGenerator;
   double oscGainSmooth = 0.0;
   // Phase 72: Input Delay Line (max 500 ms @ 96 kHz = 48000 samples)
-  static constexpr int kMaxDelaySamples = 48000;
+  static constexpr int kMaxDelaySamples = NOVA_MAX_DELAY_MS * 96;
   std::vector<std::vector<double>> channelDelayBuffers;
   std::array<int, kLogicalChannels> channelDelayWritePos{};
   // Phase 75: Dual Solo Bus Architecture (Solo A & Solo B) & Monitor Section
