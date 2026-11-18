@@ -295,13 +295,15 @@ public:
     currentPresetIdx_ = std::clamp(idx, 0, kNumFactoryPresets - 1);
     const auto &e = lib[static_cast<size_t>(currentPresetIdx_)];
 
-    params_.preDelayMs = e.preDelayMs;
-    params_.dryWet = e.dryWet;
-    params_.reverseIR = e.reverse;
-    params_.decayScale = 1.0f;
-    params_.sizePct = 100.0f;
-    params_.irStartTrim = 0.0f;
-    params_.irEndTrim = 1.0f;
+    auto p = getParams();
+    p.preDelayMs = e.preDelayMs;
+    p.dryWet = e.dryWet;
+    p.reverseIR = e.reverse;
+    p.decayScale = 1.0f;
+    p.sizePct = 100.0f;
+    p.irStartTrim = 0.0f;
+    p.irEndTrim = 1.0f;
+    setParams(p);
     irFileName_ = e.fileName;
     irIsStereo_ = true;
 
@@ -310,7 +312,9 @@ public:
 
   // Legacy preset loader (preserved)
   void loadPreset(IRPreset preset) {
-    params_.preset = preset;
+    auto p = getParams();
+    p.preset = preset;
+    setParams(p);
     switch (preset) {
     case IRPreset::Hall_Large: loadFactoryPreset(0); break;
     case IRPreset::Hall_Small: loadFactoryPreset(2); break;
@@ -542,20 +546,21 @@ public:
 
 #if NOVA_HAS_JUCE_CORE
   juce::var toVar() const {
+    const auto p = getParams();
     auto obj = new juce::DynamicObject();
-    obj->setProperty("preset", static_cast<int>(params_.preset));
-    obj->setProperty("dryWet", static_cast<double>(params_.dryWet));
-    obj->setProperty("preDelayMs", static_cast<double>(params_.preDelayMs));
-    obj->setProperty("decayScale", static_cast<double>(params_.decayScale));
-    obj->setProperty("sizePct", static_cast<double>(params_.sizePct));
-    obj->setProperty("stereoWidth", static_cast<double>(params_.stereoWidth));
-    obj->setProperty("loCutHz", static_cast<double>(params_.loCutHz));
-    obj->setProperty("hiCutHz", static_cast<double>(params_.hiCutHz));
-    obj->setProperty("lowShelfGain", static_cast<double>(params_.lowShelfGain));
-    obj->setProperty("midEqGain", static_cast<double>(params_.midEqGain));
-    obj->setProperty("highShelfGain", static_cast<double>(params_.highShelfGain));
-    obj->setProperty("reverseIR", params_.reverseIR);
-    obj->setProperty("normalizeIR", params_.normalizeIR);
+    obj->setProperty("preset", static_cast<int>(p.preset));
+    obj->setProperty("dryWet", static_cast<double>(p.dryWet));
+    obj->setProperty("preDelayMs", static_cast<double>(p.preDelayMs));
+    obj->setProperty("decayScale", static_cast<double>(p.decayScale));
+    obj->setProperty("sizePct", static_cast<double>(p.sizePct));
+    obj->setProperty("stereoWidth", static_cast<double>(p.stereoWidth));
+    obj->setProperty("loCutHz", static_cast<double>(p.loCutHz));
+    obj->setProperty("hiCutHz", static_cast<double>(p.hiCutHz));
+    obj->setProperty("lowShelfGain", static_cast<double>(p.lowShelfGain));
+    obj->setProperty("midEqGain", static_cast<double>(p.midEqGain));
+    obj->setProperty("highShelfGain", static_cast<double>(p.highShelfGain));
+    obj->setProperty("reverseIR", p.reverseIR);
+    obj->setProperty("normalizeIR", p.normalizeIR);
     return juce::var(obj);
   }
 #endif
@@ -604,6 +609,7 @@ private:
   }
 
   void prepareIR() {
+    const auto p = getParams();
     if (irL_.empty())
       return;
     const int writeSlot = 1 - activeSlot_.load(std::memory_order_relaxed);
@@ -613,13 +619,13 @@ private:
 
     auto &dst = irSlots_[static_cast<size_t>(writeSlot)];
     const int fullLen = static_cast<int>(irL_.size());
-    const int startSample = std::clamp(static_cast<int>(params_.irStartTrim * fullLen), 0, fullLen - 1);
-    int endSample = std::clamp(static_cast<int>(params_.irEndTrim * fullLen), startSample + 64, fullLen);
+    const int startSample = std::clamp(static_cast<int>(p.irStartTrim * fullLen), 0, fullLen - 1);
+    int endSample = std::clamp(static_cast<int>(p.irEndTrim * fullLen), startSample + 64, fullLen);
     if (endSample <= startSample)
       endSample = fullLen;
 
     const int trimmedLen = endSample - startSample;
-    const double sizeRatio = std::clamp(params_.sizePct / 100.0, 0.5, 2.0);
+    const double sizeRatio = std::clamp(p.sizePct / 100.0, 0.5, 2.0);
     const int stretchedLen = std::clamp(static_cast<int>(trimmedLen * sizeRatio), 256, MAX_IR_SAMPLES);
 
     dst.L.resize(static_cast<size_t>(stretchedLen));
@@ -627,16 +633,16 @@ private:
 
     for (int i = 0; i < stretchedLen; ++i) {
       const double normPos = static_cast<double>(i) / static_cast<double>(stretchedLen);
-      const double srcPos = params_.reverseIR ? (1.0 - normPos) : normPos;
+      const double srcPos = p.reverseIR ? (1.0 - normPos) : normPos;
       const int srcIdx = std::clamp(startSample + static_cast<int>(srcPos * (trimmedLen - 1)),
                                     0, fullLen - 1);
       const float envScale = std::pow(1.0f - static_cast<float>(normPos),
-                                      1.0f / std::max(0.2f, params_.decayScale));
+                                      1.0f / std::max(0.2f, p.decayScale));
       dst.L[static_cast<size_t>(i)] = irL_[static_cast<size_t>(srcIdx)] * envScale;
       dst.R[static_cast<size_t>(i)] = irR_[static_cast<size_t>(srcIdx)] * envScale;
     }
 
-    if (params_.normalizeIR) {
+    if (p.normalizeIR) {
       float maxVal = 0.0f;
       for (float v : dst.L) maxVal = std::max(maxVal, std::abs(v));
       for (float v : dst.R) maxVal = std::max(maxVal, std::abs(v));
