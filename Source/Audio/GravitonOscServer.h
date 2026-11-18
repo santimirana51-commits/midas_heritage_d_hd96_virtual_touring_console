@@ -333,21 +333,22 @@ public:
             if (bytesRead > 0) {
                 packetsReceived.fetch_add(1, std::memory_order_relaxed);
 
-                // Global packet-rate ceiling limits trivial UDP flooding.
-                const uint32_t nowMs = juce::Time::getMillisecondCounter();
-                if (static_cast<uint32_t>(nowMs - rateWindowStartMs_) >= 1000u) {
-                    rateWindowStartMs_ = nowMs;
-                    rateWindowPackets_ = 0;
-                }
-                if (++rateWindowPackets_ > kMaxPacketsPerSecond)
-                    continue;
-
                 bool senderAllowed = false;
                 {
                     const juce::ScopedLock sl(clientLock);
                     senderAllowed = std::find(allowedAddresses.begin(), allowedAddresses.end(), senderIp) != allowedAddresses.end();
                 }
                 if (!senderAllowed)
+                    continue;
+
+                // Apply the rate ceiling only after allowlist validation so an
+                // untrusted sender cannot consume the trusted controller budget.
+                const uint32_t nowMs = juce::Time::getMillisecondCounter();
+                if (static_cast<uint32_t>(nowMs - rateWindowStartMs_) >= 1000u) {
+                    rateWindowStartMs_ = nowMs;
+                    rateWindowPackets_ = 0;
+                }
+                if (++rateWindowPackets_ > kMaxPacketsPerSecond)
                     continue;
 
                 {
