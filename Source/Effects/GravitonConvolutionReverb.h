@@ -423,7 +423,9 @@ public:
 
     refreshAudioParams();
     const auto &audioParams = audioCachedParams_;
+    const double currentSampleRate = getSampleRate();
     if (!audioFilterParamsValid_ ||
+        currentSampleRate != audioFilterSampleRate_ ||
         audioParams.loCutHz != audioFilterParams_.loCutHz ||
         audioParams.hiCutHz != audioFilterParams_.hiCutHz ||
         audioParams.lowShelfGain != audioFilterParams_.lowShelfGain ||
@@ -431,6 +433,7 @@ public:
         audioParams.highShelfGain != audioFilterParams_.highShelfGain) {
       updateToneFilters(audioParams);
       audioFilterParams_ = audioParams;
+      audioFilterSampleRate_ = currentSampleRate;
       audioFilterParamsValid_ = true;
     }
 
@@ -739,6 +742,7 @@ private:
   ConvReverbParams audioCachedParams_{};
   ConvReverbParams audioFilterParams_{};
   bool audioFilterParamsValid_ = false;
+  double audioFilterSampleRate_ = 0.0;
   std::atomic<double> sampleRate_{48000.0};
   int currentPresetIdx_ = 0;
   std::string irFileName_{"Large_Concert_Hall.wav"};
