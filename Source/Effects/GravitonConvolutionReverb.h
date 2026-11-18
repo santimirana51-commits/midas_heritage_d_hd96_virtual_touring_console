@@ -190,8 +190,10 @@ public:
            p.reverseIR != params_.reverseIR ||
            p.normalizeIR != params_.normalizeIR);
       params_ = p;
+      // Publish while holding the same writer lock so concurrent control
+      // updates cannot publish out of order relative to params_.
+      publishAudioParams(p);
     }
-    publishAudioParams(p);
     if (needIrRebuild && irLoaded_.load(std::memory_order_acquire))
       prepareIR();
   }
