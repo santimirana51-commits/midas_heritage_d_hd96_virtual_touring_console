@@ -334,17 +334,18 @@ public:
   void selectSlotB(bool useB) {
     if (useB == activeSlotB_)
       return;
+    const auto currentParams = getParams();
     if (activeSlotB_)
-      slotB_ = params_;
+      slotB_ = currentParams;
     else
-      slotA_ = params_;
+      slotA_ = currentParams;
     activeSlotB_ = useB;
     setParams(activeSlotB_ ? slotB_ : slotA_);
   }
   bool isSlotB() const { return activeSlotB_; }
 
   void saveUserPreset() {
-    userSaved_ = params_;
+    userSaved_ = getParams();
     hasUserSaved_ = true;
   }
   bool hasUserPreset() const { return hasUserSaved_; }
