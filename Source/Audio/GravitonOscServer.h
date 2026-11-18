@@ -60,7 +60,7 @@ public:
 
         // 2. Read Type Tags String
         if (data[offset] != ',')
-            return true; // No type tag string
+            return false; // Payload without a type-tag string is malformed
 
         size_t tagEnd = offset;
         while (tagEnd < size && data[tagEnd] != '\0') {
@@ -109,6 +109,7 @@ public:
                     std::string str(reinterpret_cast<const char*>(data + offset), sEnd - offset);
                     out.stringArgs.push_back(str);
                     offset = padTo4(sEnd + 1);
+                    if (offset > size) return false;
                     break;
                 }
                 // OSC type tags without payload (OSC 1.0).
