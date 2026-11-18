@@ -203,12 +203,12 @@ public:
 
   void setSampleRate(double sr) {
     if (sr > 1000.0 && std::isfinite(sr)) {
-      sampleRate_ = sr;
+      sampleRate_.store(sr, std::memory_order_release);
       if (irLoaded_.load(std::memory_order_acquire))
         prepareIR();
     }
   }
-  double getSampleRate() const { return sampleRate_; }
+  double getSampleRate() const { return sampleRate_.load(std::memory_order_acquire); }
 
   // ── Load IR ──
   bool loadIR(const std::vector<float> &irData, double irSampleRate = 48000.0) {
@@ -216,8 +216,9 @@ public:
     if (irData.empty())
       return false;
 
-    if (std::abs(irSampleRate - sampleRate_) > 1.0) {
-      double ratio = sampleRate_ / irSampleRate;
+    const double targetSampleRate = getSampleRate();
+    if (std::abs(irSampleRate - targetSampleRate) > 1.0) {
+      double ratio = targetSampleRate / irSampleRate;
       int newLen = static_cast<int>(irData.size() * ratio);
       newLen = std::min(newLen, MAX_IR_SAMPLES);
       irL_.resize(static_cast<size_t>(newLen));
@@ -374,7 +375,7 @@ public:
     return static_cast<int>(ir.L.size());
   }
   float getIRDurationSec() const {
-    return static_cast<float>(getIRLength()) / static_cast<float>(sampleRate_);
+    return static_cast<float>(getIRLength()) / static_cast<float>(getSampleRate());
   }
 
   float getInputLevelDbL() const {
@@ -448,7 +449,7 @@ public:
     double delayedL = dryL, delayedR = dryR;
     const int pdSize = static_cast<int>(preDelayBufL_.size());
     if (audioParams.preDelayMs > 0.0f && pdSize > 1) {
-      int delaySamples = static_cast<int>(audioParams.preDelayMs * sampleRate_ / 1000.0);
+      int delaySamples = static_cast<int>(audioParams.preDelayMs * getSampleRate() / 1000.0);
       delaySamples = std::clamp(delaySamples, 0, pdSize - 1);
       if (delaySamples > 0) {
         preDelayBufL_[static_cast<size_t>(preDelayPos_)] = static_cast<float>(dryL);
@@ -575,7 +576,8 @@ private:
 
   void generateSyntheticIR(float durationSec, float decayTime, float earlyLevel,
                            float density) {
-    const int irLen = std::clamp(static_cast<int>(sampleRate_ * durationSec),
+    const double sr = getSampleRate();
+    const int irLen = std::clamp(static_cast<int>(sr * durationSec),
                                  1024, MAX_IR_SAMPLES);
     std::lock_guard<std::mutex> lock(mutex_);
     irL_.resize(static_cast<size_t>(irLen));
@@ -591,13 +593,13 @@ private:
     };
 
     for (int i = 0; i < irLen; ++i) {
-      const float t = static_cast<float>(i) / static_cast<float>(sampleRate_);
+      const float t = static_cast<float>(i) / static_cast<float>(sr);
       const float env = std::exp(-3.0f * t / std::max(0.1f, decayTime));
       float early = 0.0f;
       if (t < 0.06f) {
         static constexpr int erMs[] = {4, 9, 15, 21, 29, 37, 46, 54};
         for (int er : erMs) {
-          if (i == static_cast<int>(er * sampleRate_ / 1000.0))
+          if (i == static_cast<int>(er * sr / 1000.0))
             early = earlyLevel * (pseudoRand() > 0.0f ? 1.0f : -1.0f);
         }
       }
@@ -706,7 +708,7 @@ private:
   }
 
   void updateToneFilters(const ConvReverbParams &p) {
-    const double sr = std::max(8000.0, sampleRate_);
+    const double sr = std::max(8000.0, getSampleRate());
     const auto lc = graviton::makeButterworthHPF(sr, std::clamp<double>(p.loCutHz, 20.0, 500.0));
     const auto hc = graviton::makeButterworthLPF(sr, std::clamp<double>(p.hiCutHz, 1000.0, sr * 0.45));
     loCutL_.setCoefficients(lc); loCutR_.setCoefficients(lc);
@@ -737,7 +739,7 @@ private:
   ConvReverbParams audioCachedParams_{};
   ConvReverbParams audioFilterParams_{};
   bool audioFilterParamsValid_ = false;
-  double sampleRate_ = 48000.0;
+  std::atomic<double> sampleRate_{48000.0};
   int currentPresetIdx_ = 0;
   std::string irFileName_{"Large_Concert_Hall.wav"};
   bool irIsStereo_ = true;
