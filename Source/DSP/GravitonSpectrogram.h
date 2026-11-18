@@ -262,14 +262,23 @@ public:
     }
     
     // ── Reset ──
+    // Call only while the audio producer is stopped.
     void reset() {
-        std::lock_guard<std::mutex> lock(mutex_);
         std::fill(inputBuffer_.begin(), inputBuffer_.end(), 0.0f);
         std::fill(magnitudeDB_.begin(), magnitudeDB_.end(), -120.0f);
+        std::fill(phase_.begin(), phase_.end(), 0.0f);
         std::fill(peakHold_.begin(), peakHold_.end(), -120.0f);
-        history_.clear();
-        inputPos_ = 0;
-        frameCount_ = 0;
+        std::fill(publishedMagnitudeDB_.begin(), publishedMagnitudeDB_.end(), -120.0f);
+        std::fill(publishedPhase_.begin(), publishedPhase_.end(), 0.0f);
+        std::fill(publishedPeakHold_.begin(), publishedPeakHold_.end(), -120.0f);
+        for (auto &slot : historyFrames_) {
+            slot.sequence.store(0, std::memory_order_relaxed);
+            slot.state.store(0, std::memory_order_relaxed);
+        }
+        inputPos_ = refPos_ = 0;
+        frameCount_.store(0, std::memory_order_relaxed);
+        historyWriteSequence_ = 0;
+        historyPublishedCount_.store(0, std::memory_order_relaxed);
     }
     
 private:
@@ -342,8 +351,9 @@ private:
             
             // Apply weighting
             float freq = binToFreq(i);
-            if (weighting_ == WeightingCurve::A) db += aWeightDB(freq);
-            else if (weighting_ == WeightingCurve::C) db += cWeightDB(freq);
+            const auto weighting = weighting_.load(std::memory_order_relaxed);
+            if (weighting == WeightingCurve::A) db += aWeightDB(freq);
+            else if (weighting == WeightingCurve::C) db += cWeightDB(freq);
             
             magnitudeDB_[i] = db;
             phase_[i] = std::atan2(im, re);
@@ -360,30 +370,56 @@ private:
         float rms = std::sqrt(sumSquares / static_cast<float>(halfSize_));
         currentRMSdB_ = (rms > 1e-10f) ? 20.0f * std::log10(rms) : -120.0f;
         
-        // Update peak hold
-        if (peakHoldEnabled_) {
+        // Peak hold is audio-thread-owned; UI requests are applied here.
+        if (resetPeakHoldRequested_.exchange(false, std::memory_order_acq_rel))
+            std::fill(peakHold_.begin(), peakHold_.end(), -120.0f);
+        if (peakHoldEnabled_.load(std::memory_order_relaxed)) {
+            const float decay = peakDecayRate_.load(std::memory_order_relaxed) / 30.0f;
             for (int i = 0; i < halfSize_; ++i) {
-                if (magnitudeDB_[i] > peakHold_[i])
-                    peakHold_[i] = magnitudeDB_[i];
+                if (magnitudeDB_[static_cast<size_t>(i)] > peakHold_[static_cast<size_t>(i)])
+                    peakHold_[static_cast<size_t>(i)] = magnitudeDB_[static_cast<size_t>(i)];
                 else
-                    peakHold_[i] -= peakDecayRate_ / 30.0f;  // ~30fps
+                    peakHold_[static_cast<size_t>(i)] -= decay;
             }
         }
-        
-        // Add to history (waterfall)
-        FFTFrame frame;
-        frame.magnitudeDB = magnitudeDB_;
-        frame.phase = phase_;
-        frame.timestamp = static_cast<double>(frameCount_) * static_cast<double>(fftSize_) / sampleRate_;
-        frame.peakFreq = currentPeakFreq_;
-        frame.peakDB = currentPeakDB_;
-        frame.rmsDB = currentRMSdB_;
-        
-        history_.push_back(frame);
-        if ((int)history_.size() > MAX_HISTORY)
-            history_.pop_front();
-        
-        frameCount_++;
+
+        const int frameNumber = frameCount_.fetch_add(1, std::memory_order_relaxed);
+        currentPeakFreq_.store(binToFreq(peakBin), std::memory_order_relaxed);
+        currentPeakDB_.store(magnitudeDB_[static_cast<size_t>(peakBin)], std::memory_order_relaxed);
+        const float rms = std::sqrt(sumSquares / static_cast<float>(halfSize_));
+        currentRMSdB_.store((rms > 1e-10f) ? 20.0f * std::log10(rms) : -120.0f,
+                             std::memory_order_relaxed);
+
+        // Publish current spectrum only when the UI is not copying it.
+        int expectedSpectrumState = 0;
+        if (spectrumState_.compare_exchange_strong(expectedSpectrumState, 1,
+                                                   std::memory_order_acquire)) {
+            std::copy(magnitudeDB_.begin(), magnitudeDB_.end(), publishedMagnitudeDB_.begin());
+            std::copy(phase_.begin(), phase_.end(), publishedPhase_.begin());
+            std::copy(peakHold_.begin(), peakHold_.end(), publishedPeakHold_.begin());
+            spectrumState_.store(0, std::memory_order_release);
+        }
+
+        // Fixed-capacity waterfall ring. Every frame's vectors are preallocated
+        // by setFFTSize(); a busy UI reader causes this frame to be dropped.
+        const uint64_t sequence = historyWriteSequence_ + 1;
+        auto &slot = historyFrames_[static_cast<size_t>((sequence - 1) % MAX_HISTORY)];
+        int expectedSlotState = 0;
+        if (slot.state.compare_exchange_strong(expectedSlotState, 1,
+                                               std::memory_order_acquire)) {
+            std::copy(magnitudeDB_.begin(), magnitudeDB_.end(), slot.frame.magnitudeDB.begin());
+            std::copy(phase_.begin(), phase_.end(), slot.frame.phase.begin());
+            slot.frame.timestamp = static_cast<double>(frameNumber) *
+                                   static_cast<double>(fftSize_) /
+                                   sampleRate_.load(std::memory_order_relaxed);
+            slot.frame.peakFreq = currentPeakFreq_.load(std::memory_order_relaxed);
+            slot.frame.peakDB = currentPeakDB_.load(std::memory_order_relaxed);
+            slot.frame.rmsDB = currentRMSdB_.load(std::memory_order_relaxed);
+            slot.sequence.store(sequence, std::memory_order_release);
+            slot.state.store(0, std::memory_order_release);
+            historyWriteSequence_ = sequence;
+            historyPublishedCount_.store(sequence, std::memory_order_release);
+        }
     }
     
     // Simple radix-2 DIT FFT (interleaved real/imag)
