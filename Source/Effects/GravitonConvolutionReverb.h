@@ -747,7 +747,7 @@ private:
   };
 
   std::vector<float> irL_, irR_;
-  bool irLoaded_ = false;
+  std::atomic<bool> irLoaded_{false};
   std::array<IRBuffer, 2> irSlots_;
   std::atomic<int> activeSlot_{0};
   std::atomic<int> audioInSlot_{-1};
