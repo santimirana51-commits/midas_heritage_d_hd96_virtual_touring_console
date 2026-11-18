@@ -20,7 +20,7 @@ inline void appendStartupLog(const std::string &msg) {
   const auto logFile = logDirectory.getChildFile("app_startup.log");
   std::ofstream ofs(logFile.getFullPathName().toStdString(), std::ios::app);
   if (ofs.is_open()) {
-    ofs << msg << '\\n';
+    ofs << msg << std::endl;
     ofs.flush();
   }
 }
