@@ -6966,6 +6966,27 @@ public:
     }
 
     // =========================================================================
+    // Suite 118C: OSC sender allowlist defaults and configuration
+    // =========================================================================
+    beginTest("Suite 118C: OSC sender allowlist");
+    {
+      nova::graviton::OscServer osc;
+      auto defaults = osc.getAllowedAddresses();
+      expect(defaults.size() == 2,
+             "OSC: default policy contains loopback addresses only");
+      osc.setAllowedAddresses({juce::String("192.168.1.25"),
+                               juce::String("192.168.1.26")});
+      const auto configured = osc.getAllowedAddresses();
+      expect(configured.size() == 2 &&
+                 configured[0] == "192.168.1.25" &&
+                 configured[1] == "192.168.1.26",
+             "OSC: explicit trusted sender allowlist is retained");
+      osc.setAllowedAddresses({});
+      expect(osc.getAllowedAddresses().empty(),
+             "OSC: empty allowlist denies all senders");
+    }
+
+    // =========================================================================
     // Suite 118B: Convolution reverb concurrent parameter publication
     // =========================================================================
     beginTest("Suite 118B: Convolution reverb concurrent parameter publication");
