@@ -214,52 +214,55 @@ public:
 
   // ── Load IR ──
   bool loadIR(const std::vector<float> &irData, double irSampleRate = 48000.0) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (irData.empty())
+    if (irData.empty() || !std::isfinite(irSampleRate) || irSampleRate <= 0.0)
       return false;
 
-    const double targetSampleRate = getSampleRate();
-    if (std::abs(irSampleRate - targetSampleRate) > 1.0) {
-      double ratio = targetSampleRate / irSampleRate;
-      int newLen = static_cast<int>(irData.size() * ratio);
-      newLen = std::min(newLen, MAX_IR_SAMPLES);
-      irL_.resize(static_cast<size_t>(newLen));
-      irR_.resize(static_cast<size_t>(newLen));
-      for (int i = 0; i < newLen; ++i) {
-        double srcPos = static_cast<double>(i) / ratio;
-        int idx = static_cast<int>(srcPos);
-        float frac = static_cast<float>(srcPos - idx);
-        idx = std::min(idx, static_cast<int>(irData.size()) - 1);
-        int idx2 = std::min(idx + 1, static_cast<int>(irData.size()) - 1);
-        float val = irData[static_cast<size_t>(idx)] * (1.0f - frac) +
-                    irData[static_cast<size_t>(idx2)] * frac;
-        irL_[static_cast<size_t>(i)] = val;
-        irR_[static_cast<size_t>(i)] = val;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const double targetSampleRate = getSampleRate();
+      if (std::abs(irSampleRate - targetSampleRate) > 1.0) {
+        const double ratio = targetSampleRate / irSampleRate;
+        int newLen = static_cast<int>(irData.size() * ratio);
+        newLen = std::clamp(newLen, 1, MAX_IR_SAMPLES);
+        irL_.resize(static_cast<size_t>(newLen));
+        irR_.resize(static_cast<size_t>(newLen));
+        for (int i = 0; i < newLen; ++i) {
+          const double srcPos = static_cast<double>(i) / ratio;
+          int idx = static_cast<int>(srcPos);
+          const float frac = static_cast<float>(srcPos - idx);
+          idx = std::min(idx, static_cast<int>(irData.size()) - 1);
+          const int idx2 = std::min(idx + 1, static_cast<int>(irData.size()) - 1);
+          const float val = irData[static_cast<size_t>(idx)] * (1.0f - frac) +
+                            irData[static_cast<size_t>(idx2)] * frac;
+          irL_[static_cast<size_t>(i)] = val;
+          irR_[static_cast<size_t>(i)] = val;
+        }
+      } else {
+        const int len = std::min(static_cast<int>(irData.size()), MAX_IR_SAMPLES);
+        irL_.assign(irData.begin(), irData.begin() + len);
+        irR_ = irL_;
       }
-    } else {
-      int len = std::min(static_cast<int>(irData.size()), MAX_IR_SAMPLES);
-      irL_.assign(irData.begin(), irData.begin() + len);
-      irR_ = irL_;
+      irIsStereo_ = false;
+      irLoaded_.store(true, std::memory_order_release);
     }
-
-    irIsStereo_ = false;
-    irLoaded_ = true;
     prepareIR();
     return true;
   }
 
   bool loadStereoIR(const std::vector<float> &left,
                     const std::vector<float> &right) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    int len = std::min({static_cast<int>(left.size()),
-                        static_cast<int>(right.size()), MAX_IR_SAMPLES});
-    if (len == 0)
+    const int len = std::min({static_cast<int>(left.size()),
+                              static_cast<int>(right.size()), MAX_IR_SAMPLES});
+    if (len <= 0)
       return false;
 
-    irL_.assign(left.begin(), left.begin() + len);
-    irR_.assign(right.begin(), right.begin() + len);
-    irIsStereo_ = true;
-    irLoaded_ = true;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      irL_.assign(left.begin(), left.begin() + len);
+      irR_.assign(right.begin(), right.begin() + len);
+      irIsStereo_ = true;
+      irLoaded_.store(true, std::memory_order_release);
+    }
     prepareIR();
     return true;
   }
@@ -584,11 +587,12 @@ private:
     const double sr = getSampleRate();
     const int irLen = std::clamp(static_cast<int>(sr * durationSec),
                                  1024, MAX_IR_SAMPLES);
-    std::lock_guard<std::mutex> lock(mutex_);
-    irL_.resize(static_cast<size_t>(irLen));
-    irR_.resize(static_cast<size_t>(irLen));
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      irL_.resize(static_cast<size_t>(irLen));
+      irR_.resize(static_cast<size_t>(irLen));
 
-    unsigned int seed = 12345u + static_cast<unsigned int>(currentPresetIdx_ * 7919);
+      unsigned int seed = 12345u + static_cast<unsigned int>(currentPresetIdx_ * 7919);
     auto pseudoRand = [&seed]() -> float {
       seed = seed * 1103515245u + 12345u;
       return (static_cast<float>(seed & 0x7FFFFFFF) /
@@ -609,14 +613,18 @@ private:
         }
       }
       irL_[static_cast<size_t>(i)] = early + pseudoRand() * env * density;
-      irR_[static_cast<size_t>(i)] = early + pseudoRand() * env * density;
+        irR_[static_cast<size_t>(i)] = early + pseudoRand() * env * density;
+      }
     }
 
-    irLoaded_ = true;
+    irLoaded_.store(true, std::memory_order_release);
     prepareIR();
   }
 
   void prepareIR() {
+    // Serialize IR source mutation with IR preparation. This mutex is only
+    // taken by control/file-loading threads, never by processStereo().
+    std::lock_guard<std::mutex> irLock(mutex_);
     const auto p = getParams();
     if (irL_.empty())
       return;
