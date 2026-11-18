@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <thread>
 
 // ---------------------------------------------------------------------------
 // Phase 89 (MIDAS Chapter 36): helpers for the offline mixdown & multi-track
@@ -6962,6 +6963,36 @@ public:
       // Test 4: CSV Export
       juce::String csv = spec.exportCSV();
       expect(csv.contains("Frequency_Hz"), "Spectrogram: CSV header verified");
+    }
+
+    // =========================================================================
+    // Suite 118B: Convolution reverb concurrent parameter publication
+    // =========================================================================
+    beginTest("Suite 118B: Convolution reverb concurrent parameter publication");
+    {
+      nova::ConvolutionReverbEngine conv;
+      std::atomic<bool> writerDone{false};
+      std::thread writer([&] {
+        for (int i = 0; i < 500; ++i) {
+          auto params = conv.getParams();
+          params.dryWet = (i % 100) / 100.0f;
+          params.stereoWidth = 0.5f + (i % 150) / 100.0f;
+          conv.setParams(params);
+        }
+        writerDone.store(true, std::memory_order_release);
+      });
+      bool finiteOutput = true;
+      for (int i = 0; i < 50000; ++i) {
+        float left = 0.25f;
+        float right = -0.25f;
+        conv.processStereo(left, right);
+        finiteOutput = finiteOutput && std::isfinite(left) && std::isfinite(right);
+      }
+      writer.join();
+      expect(writerDone.load(std::memory_order_acquire),
+             "Convolution: parameter writer completed");
+      expect(finiteOutput,
+             "Convolution: concurrent parameter updates keep output finite");
     }
 
     // =========================================================================
