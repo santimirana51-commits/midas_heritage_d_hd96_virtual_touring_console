@@ -95,15 +95,31 @@ public:
         magnitudeDB_.resize(halfSize_, -120.0f);
         phase_.resize(halfSize_, 0.0f);
         peakHold_.resize(halfSize_, -120.0f);
+        publishedMagnitudeDB_.assign(halfSize_, -120.0f);
+        publishedPhase_.assign(halfSize_, 0.0f);
+        publishedPeakHold_.assign(halfSize_, -120.0f);
+        refBuffer_.assign(fftSize_, 0.0f);
+        for (auto &slot : historyFrames_) {
+            slot.frame.magnitudeDB.assign(halfSize_, -120.0f);
+            slot.frame.phase.assign(halfSize_, 0.0f);
+            slot.sequence.store(0, std::memory_order_relaxed);
+            slot.state.store(0, std::memory_order_relaxed);
+        }
+        historyWriteSequence_ = 0;
+        historyPublishedCount_.store(0, std::memory_order_relaxed);
         inputPos_ = 0;
+        refPos_ = 0;
         generateWindow();
     }
     
     int getFFTSize() const { return fftSize_; }
     int getNumBins() const { return halfSize_; }
     
-    void setSampleRate(double sr) { sampleRate_ = sr; }
-    double getSampleRate() const { return sampleRate_; }
+    void setSampleRate(double sr) {
+        if (std::isfinite(sr) && sr > 1000.0)
+            sampleRate_.store(sr, std::memory_order_relaxed);
+    }
+    double getSampleRate() const { return sampleRate_.load(std::memory_order_relaxed); }
     
     void setWindowFunction(WindowFunction wf) {
         windowFunc_ = wf;
@@ -112,7 +128,7 @@ public:
     
     void setFreqScale(FreqScale fs) { freqScale_ = fs; }
     void setSmoothing(OctaveSmoothing s) { smoothing_ = s; }
-    void setWeighting(WeightingCurve w) { weighting_ = w; }
+    void setWeighting(WeightingCurve w) { weighting_.store(w, std::memory_order_relaxed); }
     void setMode(SpectrogramMode m) { mode_ = m; }
     void setRangeDB(float minDB, float maxDB) { minDB_ = minDB; maxDB_ = maxDB; }
     
@@ -125,40 +141,32 @@ public:
     float getMaxDB() const { return maxDB_; }
     
     // ── Peak Hold ──
-    void setPeakHoldEnabled(bool en) { peakHoldEnabled_ = en; }
-    void setPeakDecayRate(float dbPerSec) { peakDecayRate_ = dbPerSec; }
-    void resetPeakHold() {
-        std::fill(peakHold_.begin(), peakHold_.end(), -120.0f);
-    }
-    bool isPeakHoldEnabled() const { return peakHoldEnabled_; }
+    void setPeakHoldEnabled(bool en) { peakHoldEnabled_.store(en, std::memory_order_relaxed); }
+    void setPeakDecayRate(float dbPerSec) { peakDecayRate_.store(std::max(0.0f, dbPerSec), std::memory_order_relaxed); }
+    void resetPeakHold() { resetPeakHoldRequested_.store(true, std::memory_order_release); }
+    bool isPeakHoldEnabled() const { return peakHoldEnabled_.load(std::memory_order_relaxed); }
     
     // ── Freeze ──
-    void setFreeze(bool f) { frozen_ = f; }
-    bool isFrozen() const { return frozen_; }
+    void setFreeze(bool f) { frozen_.store(f, std::memory_order_relaxed); }
+    bool isFrozen() const { return frozen_.load(std::memory_order_relaxed); }
     
     // ── Push Audio Samples ──
-    void pushSamples(const float* data, int numSamples) {
-        if (frozen_) return;
-        std::lock_guard<std::mutex> lock(mutex_);
+    // Single audio-producer entry point. Configuration changes require the
+    // producer to be stopped. This path performs no locking or allocation.
+    void pushSamples(const float* data, int numSamples) noexcept {
+        if (frozen_.load(std::memory_order_relaxed) || data == nullptr || numSamples <= 0) return;
         for (int i = 0; i < numSamples; ++i) {
-            inputBuffer_[inputPos_] = data[i];
-            inputPos_++;
-            if (inputPos_ >= fftSize_) {
-                processFFT();
-                inputPos_ = 0;
-            }
+            inputBuffer_[static_cast<size_t>(inputPos_)] = data[i];
+            if (++inputPos_ >= fftSize_) { processFFT(); inputPos_ = 0; }
         }
     }
     
     // Push reference channel for transfer function
-    void pushReferenceSamples(const float* data, int numSamples) {
-        if (frozen_) return;
-        std::lock_guard<std::mutex> lock(mutex_);
-        refBuffer_.resize(fftSize_, 0.0f);
+    void pushReferenceSamples(const float* data, int numSamples) noexcept {
+        if (frozen_.load(std::memory_order_relaxed) || data == nullptr || numSamples <= 0) return;
         for (int i = 0; i < numSamples; ++i) {
-            refBuffer_[refPos_] = data[i];
-            refPos_++;
-            if (refPos_ >= fftSize_) refPos_ = 0;
+            refBuffer_[static_cast<size_t>(refPos_)] = data[i];
+            if (++refPos_ >= fftSize_) refPos_ = 0;
         }
     }
     
