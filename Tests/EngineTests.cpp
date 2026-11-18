@@ -6965,6 +6965,21 @@ public:
     }
 
     // =========================================================================
+    // Suite 118A: Sample-rate-aware delay buffer capacity
+    // =========================================================================
+    beginTest("Suite 118A: Sample-rate-aware delay capacity");
+    {
+      expect(nova::MixerEngine::calculateMaxDelaySamples(96000.0) == 48000,
+             "Delay: 500 ms capacity at 96 kHz");
+      expect(nova::MixerEngine::calculateMaxDelaySamples(192000.0) == 96000,
+             "Delay: 500 ms capacity at 192 kHz");
+      expect(nova::MixerEngine::calculateMaxDelaySamples(384000.0) == 192000,
+             "Delay: 500 ms capacity at 384 kHz");
+      expect(nova::MixerEngine::calculateMaxDelaySamples(0.0) == 1,
+             "Delay: invalid sample rate is safely bounded");
+    }
+
+    // =========================================================================
     // Suite 119: Complete Show Archive Manager (.novashow format)
     // =========================================================================
     beginTest("Suite 119: Complete Show Archive Manager (.novashow format)");
