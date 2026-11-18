@@ -6943,6 +6943,16 @@ public:
              "Spectrogram: reasonable peak dB");
       expect(spec.getHistoryDepth() >= 1,
              "Spectrogram: waterfall history captured");
+      const auto spectrum = spec.getMagnitudeDB();
+      const auto phase = spec.getPhase();
+      const auto peakHold = spec.getPeakHold();
+      expect(spectrum.size() == 1024 && phase.size() == 1024 &&
+                 peakHold.size() == 1024,
+             "Spectrogram: published snapshots retain configured bin count");
+      const auto historyFrame = spec.getHistoryFrame(0);
+      expect(historyFrame.magnitudeDB.size() == 1024 &&
+                 historyFrame.phase.size() == 1024,
+             "Spectrogram: preallocated history frame is readable");
 
       // Test 3: Weighting curve helpers
       float aWeight1k = nova::SpectrogramEngine::aWeightDB(1000.0f);
