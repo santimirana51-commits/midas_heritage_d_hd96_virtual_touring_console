@@ -282,6 +282,23 @@ public:
     }
     
 private:
+    struct HistorySlot {
+        std::atomic<int> state{0}; // 0 free, 1 producer, 2 reader
+        std::atomic<uint64_t> sequence{0};
+        FFTFrame frame;
+    };
+
+    std::vector<float> copyPublished(const std::vector<float>& source) const {
+        std::vector<float> copy;
+        int expected = 0;
+        if (!spectrumState_.compare_exchange_strong(expected, 2,
+                                                   std::memory_order_acquire))
+            return copy;
+        copy = source; // UI/control thread allocation only
+        spectrumState_.store(0, std::memory_order_release);
+        return copy;
+    }
+
     void generateWindow() {
         window_.resize(fftSize_);
         for (int i = 0; i < fftSize_; ++i) {
@@ -466,44 +483,48 @@ private:
     
     int fftSize_ = 4096;
     int halfSize_ = 2048;
-    double sampleRate_ = 48000.0;
-    
+    std::atomic<double> sampleRate_{48000.0};
+
     std::vector<float> inputBuffer_;
     std::vector<float> fftBuffer_;
     std::vector<float> window_;
-    std::vector<float> magnitudeDB_;
+    std::vector<float> magnitudeDB_; // audio-thread working arrays
     std::vector<float> phase_;
     std::vector<float> peakHold_;
+    std::vector<float> publishedMagnitudeDB_;
+    std::vector<float> publishedPhase_;
+    std::vector<float> publishedPeakHold_;
+    mutable std::atomic<int> spectrumState_{0}; // 0 free, 1 producer, 2 reader
     int inputPos_ = 0;
-    
-    // Reference channel
+
+    // Reference channel is preallocated by setFFTSize().
     std::vector<float> refBuffer_;
     int refPos_ = 0;
-    
-    // History for waterfall
-    std::deque<FFTFrame> history_;
-    int frameCount_ = 0;
-    
+
+    // Preallocated fixed-capacity waterfall ring; no vector/deque growth in FFT.
+    mutable std::array<HistorySlot, MAX_HISTORY> historyFrames_{};
+    uint64_t historyWriteSequence_ = 0; // single producer
+    std::atomic<uint64_t> historyPublishedCount_{0};
+    std::atomic<int> frameCount_{0};
+
     // Settings
     WindowFunction windowFunc_ = WindowFunction::Hann;
     FreqScale freqScale_ = FreqScale::Logarithmic;
     OctaveSmoothing smoothing_ = OctaveSmoothing::None;
-    WeightingCurve weighting_ = WeightingCurve::Z;
+    std::atomic<WeightingCurve> weighting_{WeightingCurve::Z};
     SpectrogramMode mode_ = SpectrogramMode::RTA;
     float minDB_ = -120.0f;
     float maxDB_ = 0.0f;
-    
-    // Peak hold
-    bool peakHoldEnabled_ = true;
-    float peakDecayRate_ = 6.0f;  // dB/sec
-    
-    bool frozen_ = false;
-    
-    float currentPeakFreq_ = 0.0f;
-    float currentPeakDB_ = -120.0f;
-    float currentRMSdB_ = -120.0f;
-    
-    mutable std::mutex mutex_;
+
+    // Peak hold / freeze controls cross threads via atomics.
+    std::atomic<bool> peakHoldEnabled_{true};
+    std::atomic<float> peakDecayRate_{6.0f};
+    std::atomic<bool> resetPeakHoldRequested_{false};
+    std::atomic<bool> frozen_{false};
+
+    std::atomic<float> currentPeakFreq_{0.0f};
+    std::atomic<float> currentPeakDB_{-120.0f};
+    std::atomic<float> currentRMSdB_{-120.0f};
 };
 
 } // namespace nova
