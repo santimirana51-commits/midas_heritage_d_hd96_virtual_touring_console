@@ -2272,7 +2272,7 @@ public:
 
     juce::Array<juce::var> chNamesArr;
     for (int c = 0; c < kLogicalChannels; ++c)
-      chNamesArr.add(engine.channelNames[static_cast<size_t>(c)]);
+      chNamesArr.add(engine.getChannelName(c));
     root->setProperty("channelNames", chNamesArr);
 
     // Phase 85: Binaural Preview Serialization
