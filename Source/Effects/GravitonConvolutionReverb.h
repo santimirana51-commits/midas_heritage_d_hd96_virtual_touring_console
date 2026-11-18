@@ -18,6 +18,8 @@
 #include <atomic>
 #include <cmath>
 #include <complex>
+#include <cstring>
+#include <type_traits>
 #if __has_include(<juce_audio_formats/juce_audio_formats.h>)
 #include <juce_audio_formats/juce_audio_formats.h>
 #define NOVA_HAS_JUCE_AUDIO_FORMATS 1
@@ -166,36 +168,43 @@ public:
     loadFactoryPreset(0);
     slotA_ = params_;
     slotB_ = params_;
+    publishAudioParams(params_);
+    audioCachedParams_ = params_;
   }
 
   // ── Parameters ──
-  ConvReverbParams &getParams() { return params_; }
-  const ConvReverbParams &getParams() const { return params_; }
+  ConvReverbParams getParams() const {
+    std::lock_guard<std::mutex> lock(parameterMutex_);
+    return params_;
+  }
+
   void setParams(const ConvReverbParams &p) {
-    const bool needIrRebuild =
-        (std::abs(p.decayScale - params_.decayScale) > 0.001f ||
-         std::abs(p.sizePct - params_.sizePct) > 0.1f ||
-         std::abs(p.irStartTrim - params_.irStartTrim) > 0.001f ||
-         std::abs(p.irEndTrim - params_.irEndTrim) > 0.001f ||
-         p.reverseIR != params_.reverseIR ||
-         p.normalizeIR != params_.normalizeIR);
-    params_ = p;
-    updateToneFilters();
-    if (needIrRebuild && irLoaded_)
+    bool needIrRebuild = false;
+    {
+      std::lock_guard<std::mutex> lock(parameterMutex_);
+      needIrRebuild =
+          (std::abs(p.decayScale - params_.decayScale) > 0.001f ||
+           std::abs(p.sizePct - params_.sizePct) > 0.1f ||
+           std::abs(p.irStartTrim - params_.irStartTrim) > 0.001f ||
+           std::abs(p.irEndTrim - params_.irEndTrim) > 0.001f ||
+           p.reverseIR != params_.reverseIR ||
+           p.normalizeIR != params_.normalizeIR);
+      params_ = p;
+    }
+    publishAudioParams(p);
+    if (needIrRebuild && irLoaded_.load(std::memory_order_acquire))
       prepareIR();
   }
 
   void refreshIRProcessing() {
-    updateToneFilters();
-    if (irLoaded_)
+    if (irLoaded_.load(std::memory_order_acquire))
       prepareIR();
   }
 
   void setSampleRate(double sr) {
     if (sr > 1000.0 && std::isfinite(sr)) {
       sampleRate_ = sr;
-      updateToneFilters();
-      if (irLoaded_)
+      if (irLoaded_.load(std::memory_order_acquire))
         prepareIR();
     }
   }
@@ -406,11 +415,24 @@ public:
     updateMeter(inLevelDbL_, dryL);
     updateMeter(inLevelDbR_, dryR);
 
+    refreshAudioParams();
+    const auto &audioParams = audioCachedParams_;
+    if (!audioFilterParamsValid_ ||
+        audioParams.loCutHz != audioFilterParams_.loCutHz ||
+        audioParams.hiCutHz != audioFilterParams_.hiCutHz ||
+        audioParams.lowShelfGain != audioFilterParams_.lowShelfGain ||
+        audioParams.midEqGain != audioFilterParams_.midEqGain ||
+        audioParams.highShelfGain != audioFilterParams_.highShelfGain) {
+      updateToneFilters(audioParams);
+      audioFilterParams_ = audioParams;
+      audioFilterParamsValid_ = true;
+    }
+
     const int sIdx = activeSlot_.load(std::memory_order_acquire);
     audioInSlot_.store(sIdx, std::memory_order_release);
     const auto &ir = irSlots_[static_cast<size_t>(sIdx)];
 
-    if (params_.bypassed || !irLoaded_ || ir.L.empty() || inputBufL_.empty()) {
+    if (audioParams.bypassed || !irLoaded_.load(std::memory_order_acquire) || ir.L.empty() || inputBufL_.empty()) {
       audioInSlot_.store(-1, std::memory_order_release);
       updateMeter(outLevelDbL_, dryL);
       updateMeter(outLevelDbR_, dryR);
@@ -420,8 +442,8 @@ public:
     // 1. Pre-delay
     double delayedL = dryL, delayedR = dryR;
     const int pdSize = static_cast<int>(preDelayBufL_.size());
-    if (params_.preDelayMs > 0.0f && pdSize > 1) {
-      int delaySamples = static_cast<int>(params_.preDelayMs * sampleRate_ / 1000.0);
+    if (audioParams.preDelayMs > 0.0f && pdSize > 1) {
+      int delaySamples = static_cast<int>(audioParams.preDelayMs * sampleRate_ / 1000.0);
       delaySamples = std::clamp(delaySamples, 0, pdSize - 1);
       if (delaySamples > 0) {
         preDelayBufL_[static_cast<size_t>(preDelayPos_)] = static_cast<float>(dryL);
@@ -458,40 +480,40 @@ public:
     audioInSlot_.store(-1, std::memory_order_release);
 
     // 4. IR Filtering (Lo Cut / Hi Cut) & 3-Band EQ
-    if (params_.loCutEnabled) {
+    if (audioParams.loCutEnabled) {
       wetL = loCutL_.process(wetL);
       wetR = loCutR_.process(wetR);
     }
-    if (params_.hiCutEnabled) {
+    if (audioParams.hiCutEnabled) {
       wetL = hiCutL_.process(wetL);
       wetR = hiCutR_.process(wetR);
     }
-    if (params_.eqEnabled) {
-      if (std::abs(params_.lowShelfGain) > 0.05f) {
+    if (audioParams.eqEnabled) {
+      if (std::abs(audioParams.lowShelfGain) > 0.05f) {
         wetL = eqLowL_.process(wetL);
         wetR = eqLowR_.process(wetR);
       }
-      if (std::abs(params_.midEqGain) > 0.05f) {
+      if (std::abs(audioParams.midEqGain) > 0.05f) {
         wetL = eqMidL_.process(wetL);
         wetR = eqMidR_.process(wetR);
       }
-      if (std::abs(params_.highShelfGain) > 0.05f) {
+      if (std::abs(audioParams.highShelfGain) > 0.05f) {
         wetL = eqHighL_.process(wetL);
         wetR = eqHighR_.process(wetR);
       }
     }
 
     // 5. Stereo Width
-    if (std::abs(params_.stereoWidth - 1.0f) > 0.01f) {
+    if (std::abs(audioParams.stereoWidth - 1.0f) > 0.01f) {
       const double mid = (wetL + wetR) * 0.5;
-      const double side = (wetL - wetR) * 0.5 * params_.stereoWidth;
+      const double side = (wetL - wetR) * 0.5 * audioParams.stereoWidth;
       wetL = mid + side;
       wetR = mid - side;
     }
 
     // 6. Dry/Wet Mix
-    const double outL = dryL * (1.0 - params_.dryWet) + wetL * params_.dryWet;
-    const double outR = dryR * (1.0 - params_.dryWet) + wetR * params_.dryWet;
+    const double outL = dryL * (1.0 - audioParams.dryWet) + wetL * audioParams.dryWet;
+    const double outR = dryR * (1.0 - audioParams.dryWet) + wetR * audioParams.dryWet;
 
     left = std::isfinite(outL) ? static_cast<float>(std::clamp(outL, -4.0, 4.0)) : 0.0f;
     right = std::isfinite(outR) ? static_cast<float>(std::clamp(outR, -4.0, 4.0)) : 0.0f;
@@ -643,16 +665,49 @@ private:
     activeSlot_.store(writeSlot, std::memory_order_release);
   }
 
-  void updateToneFilters() {
+  static constexpr size_t kParamWordCount =
+      (sizeof(ConvReverbParams) + sizeof(uint32_t) - 1) / sizeof(uint32_t);
+  static_assert(std::is_trivially_copyable_v<ConvReverbParams>);
+  static_assert(std::atomic<uint32_t>::is_always_lock_free,
+                "Audio parameter publication requires lock-free 32-bit atomics");
+
+  void publishAudioParams(const ConvReverbParams &p) {
+    std::lock_guard<std::mutex> writerLock(parameterPublishMutex_);
+    std::array<uint32_t, kParamWordCount> words{};
+    std::memcpy(words.data(), &p, sizeof(p));
+    audioParamsVersion_.fetch_add(1, std::memory_order_acq_rel); // odd: write in progress
+    for (size_t i = 0; i < words.size(); ++i)
+      audioParamWords_[i].store(words[i], std::memory_order_relaxed);
+    audioParamsVersion_.fetch_add(1, std::memory_order_release); // even: published
+  }
+
+  void refreshAudioParams() noexcept {
+    for (int attempt = 0; attempt < 2; ++attempt) {
+      const uint64_t before = audioParamsVersion_.load(std::memory_order_acquire);
+      if ((before & 1u) != 0u)
+        continue;
+      std::array<uint32_t, kParamWordCount> words{};
+      for (size_t i = 0; i < words.size(); ++i)
+        words[i] = audioParamWords_[i].load(std::memory_order_relaxed);
+      const uint64_t after = audioParamsVersion_.load(std::memory_order_acquire);
+      if (before == after && (after & 1u) == 0u) {
+        std::memcpy(&audioCachedParams_, words.data(), sizeof(audioCachedParams_));
+        return;
+      }
+    }
+    // Never spin or wait on the audio thread; retain the last coherent snapshot.
+  }
+
+  void updateToneFilters(const ConvReverbParams &p) {
     const double sr = std::max(8000.0, sampleRate_);
-    const auto lc = graviton::makeButterworthHPF(sr, std::clamp<double>(params_.loCutHz, 20.0, 500.0));
-    const auto hc = graviton::makeButterworthLPF(sr, std::clamp<double>(params_.hiCutHz, 1000.0, sr * 0.45));
+    const auto lc = graviton::makeButterworthHPF(sr, std::clamp<double>(p.loCutHz, 20.0, 500.0));
+    const auto hc = graviton::makeButterworthLPF(sr, std::clamp<double>(p.hiCutHz, 1000.0, sr * 0.45));
     loCutL_.setCoefficients(lc); loCutR_.setCoefficients(lc);
     hiCutL_.setCoefficients(hc); hiCutR_.setCoefficients(hc);
 
-    const auto eqL = graviton::makePeakingEq(sr, 160.0, params_.lowShelfGain, 0.7);
-    const auto eqM = graviton::makePeakingEq(sr, 1400.0, params_.midEqGain, 0.8);
-    const auto eqH = graviton::makePeakingEq(sr, 7500.0, params_.highShelfGain, 0.7);
+    const auto eqL = graviton::makePeakingEq(sr, 160.0, p.lowShelfGain, 0.7);
+    const auto eqM = graviton::makePeakingEq(sr, 1400.0, p.midEqGain, 0.8);
+    const auto eqH = graviton::makePeakingEq(sr, 7500.0, p.highShelfGain, 0.7);
     eqLowL_.setCoefficients(eqL); eqLowR_.setCoefficients(eqL);
     eqMidL_.setCoefficients(eqM); eqMidR_.setCoefficients(eqM);
     eqHighL_.setCoefficients(eqH); eqHighR_.setCoefficients(eqH);
@@ -668,6 +723,13 @@ private:
   }
 
   ConvReverbParams params_;
+  mutable std::mutex parameterMutex_;
+  std::mutex parameterPublishMutex_;
+  std::array<std::atomic<uint32_t>, kParamWordCount> audioParamWords_{};
+  std::atomic<uint64_t> audioParamsVersion_{0};
+  ConvReverbParams audioCachedParams_{};
+  ConvReverbParams audioFilterParams_{};
+  bool audioFilterParamsValid_ = false;
   double sampleRate_ = 48000.0;
   int currentPresetIdx_ = 0;
   std::string irFileName_{"Large_Concert_Hall.wav"};
