@@ -212,6 +212,25 @@ public:
         stopServer();
     }
 
+    // UDP OSC has no built-in authentication. Default-deny remote senders;
+    // explicitly allow only trusted controller IP addresses.
+    void setAllowedAddresses(const std::vector<juce::String>& addresses) {
+        std::vector<juce::String> clean;
+        clean.reserve(addresses.size());
+        for (auto address : addresses) {
+            address = address.trim();
+            if (address.isNotEmpty() && !clean.contains(address))
+                clean.push_back(address);
+        }
+        const juce::ScopedLock sl(clientLock);
+        allowedAddresses = std::move(clean);
+    }
+
+    std::vector<juce::String> getAllowedAddresses() const {
+        const juce::ScopedLock sl(clientLock);
+        return allowedAddresses;
+    }
+
     bool startServer(int port = 53000) {
         stopServer();
 
@@ -313,6 +332,24 @@ public:
 
             if (bytesRead > 0) {
                 packetsReceived.fetch_add(1, std::memory_order_relaxed);
+
+                // Global packet-rate ceiling limits trivial UDP flooding.
+                const uint32_t nowMs = juce::Time::getMillisecondCounter();
+                if (static_cast<uint32_t>(nowMs - rateWindowStartMs_) >= 1000u) {
+                    rateWindowStartMs_ = nowMs;
+                    rateWindowPackets_ = 0;
+                }
+                if (++rateWindowPackets_ > kMaxPacketsPerSecond)
+                    continue;
+
+                bool senderAllowed = false;
+                {
+                    const juce::ScopedLock sl(clientLock);
+                    senderAllowed = allowedAddresses.contains(senderIp);
+                }
+                if (!senderAllowed)
+                    continue;
+
                 {
                     const juce::ScopedLock sl(clientLock);
                     lastClientIp = senderIp;
@@ -353,6 +390,11 @@ private:
     juce::String lastClientIp;
     int lastClientPort{0};
     std::vector<std::pair<juce::String, int>> registeredClients;
+    // Loopback-only until the host explicitly configures trusted tablet IPs.
+    std::vector<juce::String> allowedAddresses{"127.0.0.1", "::1"};
+    static constexpr uint32_t kMaxPacketsPerSecond = 1000;
+    uint32_t rateWindowStartMs_ = 0;
+    uint32_t rateWindowPackets_ = 0;
 };
 
 } // namespace nova::graviton
