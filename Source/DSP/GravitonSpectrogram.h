@@ -107,6 +107,7 @@ public:
         }
         historyWriteSequence_ = 0;
         historyPublishedCount_.store(0, std::memory_order_relaxed);
+        frameCount_.store(0, std::memory_order_relaxed);
         inputPos_ = 0;
         refPos_ = 0;
         generateWindow();
@@ -135,7 +136,7 @@ public:
     SpectrogramMode getMode() const { return mode_; }
     FreqScale getFreqScale() const { return freqScale_; }
     OctaveSmoothing getSmoothing() const { return smoothing_; }
-    WeightingCurve getWeighting() const { return weighting_; }
+    WeightingCurve getWeighting() const { return weighting_.load(std::memory_order_relaxed); }
     WindowFunction getWindowFunction() const { return windowFunc_; }
     float getMinDB() const { return minDB_; }
     float getMaxDB() const { return maxDB_; }
@@ -381,11 +382,6 @@ private:
             }
             sumSquares += mag * mag;
         }
-        
-        currentPeakFreq_ = binToFreq(peakBin);
-        currentPeakDB_ = magnitudeDB_[peakBin];
-        float rms = std::sqrt(sumSquares / static_cast<float>(halfSize_));
-        currentRMSdB_ = (rms > 1e-10f) ? 20.0f * std::log10(rms) : -120.0f;
         
         // Peak hold is audio-thread-owned; UI requests are applied here.
         if (resetPeakHoldRequested_.exchange(false, std::memory_order_acq_rel))
