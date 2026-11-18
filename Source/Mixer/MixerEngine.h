@@ -54,6 +54,7 @@
 #include <atomic>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <utility>
