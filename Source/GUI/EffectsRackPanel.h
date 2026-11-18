@@ -3682,7 +3682,7 @@ public:
 
     } else if (t == nova::graviton::FxType::Convolution_Reverb) {
 
-      auto &p = slot.convReverb.getParams();
+      const auto p = slot.convReverb.getParams();
 
       paramLabels[0].setText("Decay Scale:", juce::dontSendNotification);
 
@@ -3693,9 +3693,9 @@ public:
       paramSliders[0].setTextValueSuffix("x");
 
       paramSliders[0].onValueChange = [&slot, this] {
-        slot.convReverb.getParams().decayScale =
-
-            static_cast<float>(paramSliders[0].getValue());
+        auto params = slot.convReverb.getParams();
+        params.decayScale = static_cast<float>(paramSliders[0].getValue());
+        slot.convReverb.setParams(params);
       };
 
       paramLabels[1].setText("Pre-Delay (ms):", juce::dontSendNotification);
@@ -3707,9 +3707,9 @@ public:
       paramSliders[1].setTextValueSuffix(" ms");
 
       paramSliders[1].onValueChange = [&slot, this] {
-        slot.convReverb.getParams().preDelayMs =
-
-            static_cast<float>(paramSliders[1].getValue());
+        auto params = slot.convReverb.getParams();
+        params.preDelayMs = static_cast<float>(paramSliders[1].getValue());
+        slot.convReverb.setParams(params);
       };
 
       paramLabels[2].setText("Damping Freq (Hz):",
@@ -3723,9 +3723,9 @@ public:
       paramSliders[2].setTextValueSuffix(" Hz");
 
       paramSliders[2].onValueChange = [&slot, this] {
-        slot.convReverb.getParams().damping =
-
-            static_cast<float>(paramSliders[2].getValue());
+        auto params = slot.convReverb.getParams();
+        params.damping = static_cast<float>(paramSliders[2].getValue());
+        slot.convReverb.setParams(params);
       };
 
       paramLabels[3].setText("Stereo Width:", juce::dontSendNotification);
@@ -3737,9 +3737,9 @@ public:
       paramSliders[3].setTextValueSuffix("x");
 
       paramSliders[3].onValueChange = [&slot, this] {
-        slot.convReverb.getParams().stereoWidth =
-
-            static_cast<float>(paramSliders[3].getValue());
+        auto params = slot.convReverb.getParams();
+        params.stereoWidth = static_cast<float>(paramSliders[3].getValue());
+        slot.convReverb.setParams(params);
       };
 
       paramLabels[4].setText("Wet Mix (%):", juce::dontSendNotification);
@@ -3753,9 +3753,9 @@ public:
       paramSliders[4].setTextValueSuffix(" %");
 
       paramSliders[4].onValueChange = [&slot, this] {
-        slot.convReverb.getParams().dryWet =
-
-            static_cast<float>(paramSliders[4].getValue() * 0.01);
+        auto params = slot.convReverb.getParams();
+        params.dryWet = static_cast<float>(paramSliders[4].getValue() * 0.01);
+        slot.convReverb.setParams(params);
       };
 
       toggleParam.setVisible(false);
