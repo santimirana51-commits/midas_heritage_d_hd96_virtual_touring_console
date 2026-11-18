@@ -695,13 +695,13 @@ private:
 
   void refreshAudioParams() noexcept {
     for (int attempt = 0; attempt < 2; ++attempt) {
-      const uint64_t before = audioParamsVersion_.load(std::memory_order_acquire);
+      const uint32_t before = audioParamsVersion_.load(std::memory_order_acquire);
       if ((before & 1u) != 0u)
         continue;
       std::array<uint32_t, kParamWordCount> words{};
       for (size_t i = 0; i < words.size(); ++i)
         words[i] = audioParamWords_[i].load(std::memory_order_relaxed);
-      const uint64_t after = audioParamsVersion_.load(std::memory_order_acquire);
+      const uint32_t after = audioParamsVersion_.load(std::memory_order_acquire);
       if (before == after && (after & 1u) == 0u) {
         std::memcpy(&audioCachedParams_, words.data(), sizeof(audioCachedParams_));
         return;
@@ -738,7 +738,7 @@ private:
   mutable std::mutex parameterMutex_;
   std::mutex parameterPublishMutex_;
   std::array<std::atomic<uint32_t>, kParamWordCount> audioParamWords_{};
-  std::atomic<uint64_t> audioParamsVersion_{0};
+  std::atomic<uint32_t> audioParamsVersion_{0};
   ConvReverbParams audioCachedParams_{};
   ConvReverbParams audioFilterParams_{};
   bool audioFilterParamsValid_ = false;
