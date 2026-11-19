@@ -206,7 +206,6 @@ public:
 
     // ── Preset Definition & Factory Presets ────────────────────────────────
     struct Preset {
-        static_assert(std::is_trivially_copyable<Preset>::value, "Delay preset snapshot must be trivially copyable");
         const char* name = "Default";
         const char* description = "Default Clean Delay";
         bool syncEnabled = true;
@@ -253,6 +252,7 @@ public:
         bool bypassed = false;
         uint64_t revision = 1;
     };
+    static_assert(std::is_trivially_copyable<Preset>::value, "Delay preset snapshot must be trivially copyable");
 
     static const std::vector<Preset>& getFactoryPresets() noexcept {
         static const std::vector<Preset> presets = {
