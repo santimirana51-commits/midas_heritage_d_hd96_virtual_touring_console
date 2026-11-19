@@ -1,4 +1,5 @@
 #include "../Source/DSP/GravitonDSP.h"
+#include "../Source/DSP/GravitonGraphicEQ.h"
 #include "../Source/DSP/GravitonDN360.h"
 #include "../Source/DSP/GravitonDeEsser.h"
 #include "../Source/DSP/GravitonDynamicEQ.h"
@@ -24,6 +25,7 @@
 #include "../Source/Effects/GravitonEffectsRack.h"
 #include "../Source/Mixer/GravitonBusIntegration.h"
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -2014,6 +2016,83 @@ int main() {
         assert(std::isfinite(res.gateReductionDb));
       }
     }
+  }
+
+  // GUI/control writers publish coherent snapshots; audio readers never lock.
+  {
+    GraphicEQ eq;
+    std::atomic<bool> writerDone{false};
+    std::thread writer([&] {
+      for (int i = 0; i < 4000; ++i) {
+        eq.setBandGain(static_cast<size_t>(i % GraphicEQ::kNumBands),
+                       static_cast<float>((i % 25) - 12));
+        eq.setProportionalQ((i & 1) != 0);
+        eq.setHpf((i & 2) != 0, 35.0 + static_cast<double>(i % 400));
+        eq.setBypassed((i % 7) == 0);
+      }
+      writerDone.store(true, std::memory_order_release);
+    });
+    bool finite = true;
+    for (int i = 0; i < 30000; ++i) {
+      double l = 0.2 * std::sin(i * 0.01), r = -0.15 * std::cos(i * 0.013);
+      eq.processStereo(l, r);
+      finite = finite && std::isfinite(l) && std::isfinite(r);
+    }
+    writer.join();
+    assert(writerDone.load(std::memory_order_acquire));
+    assert(finite);
+  }
+
+  {
+    nova::HybridReverbEngine hybrid;
+    hybrid.init(48000.0);
+    std::atomic<bool> writerDone{false};
+    std::thread writer([&] {
+      for (int i = 0; i < 2500; ++i) {
+        auto p = hybrid.getParams();
+        p.decay = 0.2f + static_cast<float>(i % 200) * 0.05f;
+        p.dryWet = static_cast<float>(i % 101) * 0.01f;
+        p.eqBands[1].freqHz = 100.0f + static_cast<float>(i % 7000);
+        p.eqBands[1].gainDb = static_cast<float>((i % 25) - 12);
+        hybrid.setParams(p);
+      }
+      writerDone.store(true, std::memory_order_release);
+    });
+    bool finite = true;
+    for (int i = 0; i < 12000; ++i) {
+      float l = (i % 97 == 0) ? 0.4f : 0.0f, r = l * 0.8f;
+      hybrid.processStereo(l, r);
+      finite = finite && std::isfinite(l) && std::isfinite(r);
+    }
+    writer.join();
+    assert(writerDone.load(std::memory_order_acquire));
+    assert(finite);
+  }
+
+  {
+    NebulaStereoDelay delay;
+    std::atomic<bool> writerDone{false};
+    std::thread writer([&] {
+      for (int i = 0; i < 5000; ++i) {
+        delay.setDelayTimeMsL(2.0 + static_cast<double>(i % 2400));
+        delay.setDelayTimeMsR(3.0 + static_cast<double>((i * 3) % 2300));
+        delay.setFeedbackL(static_cast<double>(i % 110));
+        delay.setHpfHzL(20.0 + static_cast<double>(i % 1500));
+        delay.setLpfHzR(1000.0 + static_cast<double>(i % 18000));
+        delay.setOutputGainDb(static_cast<double>((i % 49) - 24));
+        delay.setBypass((i % 11) == 0);
+      }
+      writerDone.store(true, std::memory_order_release);
+    });
+    bool finite = true;
+    for (int i = 0; i < 25000; ++i) {
+      double l = (i % 113 == 0) ? 0.35 : 0.0, r = -l * 0.7;
+      delay.processStereo(l, r);
+      finite = finite && std::isfinite(l) && std::isfinite(r);
+    }
+    writer.join();
+    assert(writerDone.load(std::memory_order_acquire));
+    assert(finite);
   }
 
   std::cout << "Graviton Mk 2 DSP tests passed (64-bit double precision).\n";
