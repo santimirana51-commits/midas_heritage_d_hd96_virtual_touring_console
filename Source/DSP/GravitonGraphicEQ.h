@@ -91,8 +91,8 @@ public:
 
     float getBandGain(size_t band) const noexcept {
         if (band >= kNumBands) return 0.0f;
-        Parameters p{};
-        return publishedParams_.load(p) ? p.bandGainDb[band] : 0.0f;
+        std::lock_guard<std::mutex> lock(controlMutex_);
+        return controlParams_.bandGainDb[band];
     }
 
     void setProportionalQ(bool value) noexcept {
@@ -103,8 +103,8 @@ public:
         }
     }
     bool getProportionalQ() const noexcept {
-        Parameters p{};
-        return publishedParams_.load(p) ? p.proportionalQ : true;
+        std::lock_guard<std::mutex> lock(controlMutex_);
+        return controlParams_.proportionalQ;
     }
 
     void setHpf(bool enabled, double freqHz) noexcept {
@@ -141,8 +141,8 @@ public:
         publishControlParams();
     }
     bool isBypassed() const noexcept {
-        Parameters p{};
-        return publishedParams_.load(p) ? p.bypassed : false;
+        std::lock_guard<std::mutex> lock(controlMutex_);
+        return controlParams_.bypassed;
     }
 
     void flatten() noexcept {
