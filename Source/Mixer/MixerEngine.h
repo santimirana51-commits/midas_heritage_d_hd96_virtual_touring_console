@@ -1199,6 +1199,7 @@ public:
     deviceStartCount.fetch_add(1, std::memory_order_relaxed);
     const double deviceSampleRate = device->getCurrentSampleRate();
     sampleRate.store(deviceSampleRate);
+    mainGraphicEQ.setSampleRate(deviceSampleRate);
     // This callback runs before processBlock resumes. Resize here, never from
     // the real-time audio callback, so the configured delay remains accurate
     // at 44.1/48/88.2/96/176.4/192 kHz and other supported rates.
@@ -1936,7 +1937,7 @@ public:
     }
     if (std::abs(sr - lastCallbackSampleRate) > 1.0) {
       lastCallbackSampleRate = sr;
-      mainGraphicEQ.setSampleRate(static_cast<double>(sr));
+      // DSP coefficient/buffer preparation is performed in audioDeviceAboutToStart().
       // EffectsRack sample-rate preparation can allocate/rebuild IR buffers.
       // It is performed in audioDeviceAboutToStart(), never in processBlock().
       duganAutomixer.setSampleRate(static_cast<double>(sr));
