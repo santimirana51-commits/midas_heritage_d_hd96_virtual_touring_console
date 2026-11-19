@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DSP/GravitonDSP.h"
+#include "DSP/GravitonAtomicParameterSnapshot.h"
 #include <array>
 #include <cmath>
 #include <algorithm>
@@ -127,39 +128,47 @@ public:
         peakHoldOutVal.store(0.0f, std::memory_order_relaxed);
         corrDotSum = corrEnergyL = corrEnergyR = 0.0;
 
-        updateFilters();
+        audioParams_ = makeCurrentPreset();
+        updateFilters(audioParams_);
+        audioRevision_ = audioParams_.revision;
     }
 
     void setSampleRate(double sr) noexcept {
-        if (sr > 1000.0 && std::abs(sr - sampleRate) > 1.0) {
-            sampleRate = sr;
-            updateFilters();
-        }
+        if (std::isfinite(sr) && sr > 1000.0)
+            sampleRate = sr; // filter coefficients are rebuilt by the audio thread
     }
 
     // ── Global & Sync Controls ─────────────────────────────────────────────
     void setBpm(double newBpm) noexcept { bpm = std::clamp(newBpm, 20.0, 300.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getBpm() const noexcept { return bpm; }
 
     void setSyncEnabled(bool sync) noexcept { syncEnabled = sync; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     bool getSyncEnabled() const noexcept { return syncEnabled; }
 
     void setLinked(bool lk) noexcept { linked = lk; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     bool getLinked() const noexcept { return linked; }
 
     void setAnalogMode(DelayAnalogMode mode) noexcept { analogMode = mode; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     DelayAnalogMode getAnalogMode() const noexcept { return analogMode; }
 
     void setFxEnabled(bool on) noexcept { fxEnabled = on; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     bool getFxEnabled() const noexcept { return fxEnabled; }
 
     void setBypass(bool bp) noexcept { bypassed = bp; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     bool getBypass() const noexcept { return bypassed; }
 
     void setInputGainDb(double db) noexcept { inGainDb = std::clamp(db, -24.0, 24.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getInputGainDb() const noexcept { return inGainDb; }
 
     void setOutputGainDb(double db) noexcept { outGainDb = std::clamp(db, -24.0, 24.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getOutputGainDb() const noexcept { return outGainDb; }
 
     void resetClip() noexcept {
@@ -218,6 +227,7 @@ public:
         double dryPanR = 40.0;
         double inGainDb = 0.0;
         double outGainDb = 0.0;
+        uint64_t revision = 1;
     };
 
     static const std::vector<Preset>& getFactoryPresets() noexcept {
@@ -327,6 +337,7 @@ public:
     }
 
     void loadPreset(const Preset& p) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         syncEnabled = p.syncEnabled;
         analogMode = p.analogMode;
         // Left
@@ -367,10 +378,16 @@ public:
         inGainDb = p.inGainDb;
         outGainDb = p.outGainDb;
 
-        updateFilters();
+        publishParamsLocked();
     }
 
     Preset getCurrentPreset(const char* name = "Custom") const noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
+        return makeCurrentPreset(name);
+    }
+
+private:
+    Preset makeCurrentPreset(const char* name = "Custom") const noexcept {
         Preset p;
         p.name = name;
         p.description = "Current Settings";
@@ -412,186 +429,238 @@ public:
         p.dryPanR = dryPanR;
         p.inGainDb = inGainDb;
         p.outGainDb = outGainDb;
+        p.revision = controlRevision_;
         return p;
     }
 
+public:
     // ── Left Channel Parameters ────────────────────────────────────────────
     void setInputSourceL(DelayInputSource src) noexcept { inputSourceL = src; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     DelayInputSource getInputSourceL() const noexcept { return inputSourceL; }
 
     void setDelayTimeMsL(double ms) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         delayTimeMsL = std::clamp(ms, 1.0, 2500.0);
         if (linked) delayTimeMsR = delayTimeMsL;
+        publishParamsLocked();
     }
     double getDelayTimeMsL() const noexcept { return delayTimeMsL; }
 
     void setNoteDivisionL(NoteDivision div) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         noteDivL = div;
         if (linked) noteDivR = div;
+        publishParamsLocked();
     }
     NoteDivision getNoteDivisionL() const noexcept { return noteDivL; }
 
     void setDeviationCentsL(double cents) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         deviationCentsL = std::clamp(cents, -100.0, 100.0);
         if (linked) deviationCentsR = deviationCentsL;
+        publishParamsLocked();
     }
     double getDeviationCentsL() const noexcept { return deviationCentsL; }
 
     void divideTimeL() noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         delayTimeMsL = std::max(1.0, delayTimeMsL * 0.5);
         if (linked) delayTimeMsR = delayTimeMsL;
+        publishParamsLocked();
     }
     void multiplyTimeL() noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         delayTimeMsL = std::min(2500.0, delayTimeMsL * 2.0);
         if (linked) delayTimeMsR = delayTimeMsL;
+        publishParamsLocked();
     }
 
     void setHpfHzL(double hz) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         hpfHzL = std::clamp(hz, 10.0, 2000.0);
         if (linked) hpfHzR = hpfHzL;
-        updateFilters();
+        publishParamsLocked();
     }
     double getHpfHzL() const noexcept { return hpfHzL; }
 
     void setHpfsDbL(double slope) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         hpfsDbL = std::clamp(slope, 6.0, 48.0);
         if (linked) hpfsDbR = hpfsDbL;
-        updateFilters();
+        publishParamsLocked();
     }
     double getHpfsDbL() const noexcept { return hpfsDbL; }
 
     void setLpfHzL(double hz) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         lpfHzL = std::clamp(hz, 500.0, 22000.0);
         if (linked) lpfHzR = lpfHzL;
-        updateFilters();
+        publishParamsLocked();
     }
     double getLpfHzL() const noexcept { return lpfHzL; }
 
     void setLpfsDbL(double slope) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         lpfsDbL = std::clamp(slope, 6.0, 48.0);
         if (linked) lpfsDbR = lpfsDbL;
-        updateFilters();
+        publishParamsLocked();
     }
     double getLpfsDbL() const noexcept { return lpfsDbL; }
 
     void setFeedbackL(double pct) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         feedbackPctL = std::clamp(pct, 0.0, 110.0);
         if (linked) feedbackPctR = feedbackPctL;
+        publishParamsLocked();
     }
     double getFeedbackL() const noexcept { return feedbackPctL; }
 
     void setCrossfeedLR(double pct) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         crossfeedPctLR = std::clamp(pct, 0.0, 100.0);
         if (linked) crossfeedPctRL = crossfeedPctLR;
+        publishParamsLocked();
     }
     double getCrossfeedLR() const noexcept { return crossfeedPctLR; }
 
     void setPhaseInvertFeedbackL(bool inv) noexcept { phaseInvFbL = inv; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     bool getPhaseInvertFeedbackL() const noexcept { return phaseInvFbL; }
 
     void setPhaseInvertCrossfeedLR(bool inv) noexcept { phaseInvCrossLR = inv; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     bool getPhaseInvertCrossfeedLR() const noexcept { return phaseInvCrossLR; }
 
     // ── Right Channel Parameters ───────────────────────────────────────────
     void setInputSourceR(DelayInputSource src) noexcept { inputSourceR = src; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     DelayInputSource getInputSourceR() const noexcept { return inputSourceR; }
 
     void setDelayTimeMsR(double ms) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         delayTimeMsR = std::clamp(ms, 1.0, 2500.0);
         if (linked) delayTimeMsL = delayTimeMsR;
+        publishParamsLocked();
     }
     double getDelayTimeMsR() const noexcept { return delayTimeMsR; }
 
     void setNoteDivisionR(NoteDivision div) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         noteDivR = div;
         if (linked) noteDivL = div;
+        publishParamsLocked();
     }
     NoteDivision getNoteDivisionR() const noexcept { return noteDivR; }
 
     void setDeviationCentsR(double cents) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         deviationCentsR = std::clamp(cents, -100.0, 100.0);
         if (linked) deviationCentsL = deviationCentsR;
+        publishParamsLocked();
     }
     double getDeviationCentsR() const noexcept { return deviationCentsR; }
 
     void divideTimeR() noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         delayTimeMsR = std::max(1.0, delayTimeMsR * 0.5);
         if (linked) delayTimeMsL = delayTimeMsR;
+        publishParamsLocked();
     }
     void multiplyTimeR() noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         delayTimeMsR = std::min(2500.0, delayTimeMsR * 2.0);
         if (linked) delayTimeMsL = delayTimeMsR;
+        publishParamsLocked();
     }
 
     void setHpfHzR(double hz) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         hpfHzR = std::clamp(hz, 10.0, 2000.0);
         if (linked) hpfHzL = hpfHzR;
-        updateFilters();
+        publishParamsLocked();
     }
     double getHpfHzR() const noexcept { return hpfHzR; }
 
     void setHpfsDbR(double slope) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         hpfsDbR = std::clamp(slope, 6.0, 48.0);
         if (linked) hpfsDbL = hpfsDbR;
-        updateFilters();
+        publishParamsLocked();
     }
     double getHpfsDbR() const noexcept { return hpfsDbR; }
 
     void setLpfHzR(double hz) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         lpfHzR = std::clamp(hz, 500.0, 22000.0);
         if (linked) lpfHzL = lpfHzR;
-        updateFilters();
+        publishParamsLocked();
     }
     double getLpfHzR() const noexcept { return lpfHzR; }
 
     void setLpfsDbR(double slope) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         lpfsDbR = std::clamp(slope, 6.0, 48.0);
         if (linked) lpfsDbL = lpfsDbR;
-        updateFilters();
+        publishParamsLocked();
     }
     double getLpfsDbR() const noexcept { return lpfsDbR; }
 
     void setFeedbackR(double pct) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         feedbackPctR = std::clamp(pct, 0.0, 110.0);
         if (linked) feedbackPctL = feedbackPctR;
+        publishParamsLocked();
     }
     double getFeedbackR() const noexcept { return feedbackPctR; }
 
     void setCrossfeedRL(double pct) noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         crossfeedPctRL = std::clamp(pct, 0.0, 100.0);
         if (linked) crossfeedPctLR = crossfeedPctRL;
+        publishParamsLocked();
     }
     double getCrossfeedRL() const noexcept { return crossfeedPctRL; }
 
     void setPhaseInvertFeedbackR(bool inv) noexcept { phaseInvFbR = inv; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     bool getPhaseInvertFeedbackR() const noexcept { return phaseInvFbR; }
 
     void setPhaseInvertCrossfeedRL(bool inv) noexcept { phaseInvCrossRL = inv; }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     bool getPhaseInvertCrossfeedRL() const noexcept { return phaseInvCrossRL; }
 
     // ── Output Mixer Controls ──────────────────────────────────────────────
     void setWetLevelL(double pct) noexcept { wetLevelPctL = std::clamp(pct, 0.0, 100.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getWetLevelL() const noexcept { return wetLevelPctL; }
 
     void setDryLevelL(double pct) noexcept { dryLevelPctL = std::clamp(pct, 0.0, 100.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getDryLevelL() const noexcept { return dryLevelPctL; }
 
     void setWetPanL(double pan) noexcept { wetPanL = std::clamp(pan, -100.0, 100.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getWetPanL() const noexcept { return wetPanL; }
 
     void setDryPanL(double pan) noexcept { dryPanL = std::clamp(pan, -100.0, 100.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getDryPanL() const noexcept { return dryPanL; }
 
     void setWetLevelR(double pct) noexcept { wetLevelPctR = std::clamp(pct, 0.0, 100.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getWetLevelR() const noexcept { return wetLevelPctR; }
 
     void setDryLevelR(double pct) noexcept { dryLevelPctR = std::clamp(pct, 0.0, 100.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getDryLevelR() const noexcept { return dryLevelPctR; }
 
     void setWetPanR(double pan) noexcept { wetPanR = std::clamp(pan, -100.0, 100.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getWetPanR() const noexcept { return wetPanR; }
 
     void setDryPanR(double pan) noexcept { dryPanR = std::clamp(pan, -100.0, 100.0); }
+        std::lock_guard<std::mutex> lock(controlMutex_);
     double getDryPanR() const noexcept { return dryPanR; }
 
     // ── Real-Time Meter Readouts ───────────────────────────────────────────
@@ -603,10 +672,19 @@ public:
     // ── Audio Processing ───────────────────────────────────────────────────
     // ── Audio Processing ───────────────────────────────────────────────────
     void processStereo(double& inOutL, double& inOutR) noexcept {
-        if (bypassed || !fxEnabled) return;
+        Preset latest{};
+        if (publishedParams_.load(latest) && latest.revision != audioParams_.revision)
+            audioParams_ = latest;
+        if (audioParams_.revision != audioRevision_ ||
+            std::abs(sampleRate - audioFilterSampleRate_) > 1.0) {
+            updateFilters(audioParams_);
+            audioRevision_ = audioParams_.revision;
+        }
+        const auto& p = audioParams_;
+        if (p.bypassed || !p.fxEnabled) return;
 
         // Apply Input Gain (-24 dB to +24 dB)
-        const double inGainLin = std::pow(10.0, inGainDb * 0.05);
+        const double inGainLin = std::pow(10.0, p.inGainDb * 0.05);
         const double dryInL = inOutL * inGainLin;
         const double dryInR = inOutR * inGainLin;
 
@@ -617,7 +695,7 @@ public:
 
         // 1. Input Routing
         double srcInL = 0.0;
-        switch (inputSourceL) {
+        switch (p.inputSourceL) {
             case DelayInputSource::Left:  srcInL = dryInL; break;
             case DelayInputSource::Right: srcInL = dryInR; break;
             case DelayInputSource::Sum:   srcInL = (dryInL + dryInR) * 0.7071; break;
@@ -625,7 +703,7 @@ public:
         }
 
         double srcInR = 0.0;
-        switch (inputSourceR) {
+        switch (p.inputSourceR) {
             case DelayInputSource::Left:  srcInR = dryInL; break;
             case DelayInputSource::Right: srcInR = dryInR; break;
             case DelayInputSource::Sum:   srcInR = (dryInL + dryInR) * 0.7071; break;
@@ -633,21 +711,21 @@ public:
         }
 
         // 2. Compute Effective Delay Times (Free ms vs BPM Sync + Deviation Pitch Shift)
-        double effTimeMsL = delayTimeMsL;
-        double effTimeMsR = delayTimeMsR;
+        double effTimeMsL = p.delayTimeMsL;
+        double effTimeMsR = p.delayTimeMsR;
 
-        if (syncEnabled) {
-            const double msPerBeat = 60000.0 / std::max(20.0, bpm);
-            effTimeMsL = msPerBeat * getNoteBeats(noteDivL);
-            effTimeMsR = msPerBeat * getNoteBeats(noteDivR);
+        if (p.syncEnabled) {
+            const double msPerBeat = 60000.0 / std::max(20.0, p.bpm);
+            effTimeMsL = msPerBeat * getNoteBeats(p.noteDivL);
+            effTimeMsR = msPerBeat * getNoteBeats(p.noteDivR);
         }
 
         // Micro-timing Deviation in cents: timeFactor = 2^(-cents / 1200)
-        if (std::abs(deviationCentsL) > 0.01) {
-            effTimeMsL *= std::pow(2.0, -deviationCentsL / 1200.0);
+        if (std::abs(p.deviationCentsL) > 0.01) {
+            effTimeMsL *= std::pow(2.0, -p.deviationCentsL / 1200.0);
         }
-        if (std::abs(deviationCentsR) > 0.01) {
-            effTimeMsR *= std::pow(2.0, -deviationCentsR / 1200.0);
+        if (std::abs(p.deviationCentsR) > 0.01) {
+            effTimeMsR *= std::pow(2.0, -p.deviationCentsR / 1200.0);
         }
 
         effTimeMsL = std::clamp(effTimeMsL, 1.0, 2500.0);
@@ -656,10 +734,10 @@ public:
         // Wow & Flutter modulation for Tape / Tube modes
         double modOffsetL = 0.0;
         double modOffsetR = 0.0;
-        if (analogMode == DelayAnalogMode::WarmTape || analogMode == DelayAnalogMode::LoFi) {
+        if (p.analogMode == DelayAnalogMode::WarmTape || p.analogMode == DelayAnalogMode::LoFi) {
             wowFlutterPhase += 2.0 * std::numbers::pi * 1.8 / sampleRate;
             if (wowFlutterPhase >= 2.0 * std::numbers::pi) wowFlutterPhase -= 2.0 * std::numbers::pi;
-            const double modAmt = (analogMode == DelayAnalogMode::LoFi) ? 1.5 : 0.6; // ms
+            const double modAmt = (p.analogMode == DelayAnalogMode::LoFi) ? 1.5 : 0.6; // ms
             modOffsetL = std::sin(wowFlutterPhase) * modAmt;
             modOffsetR = std::cos(wowFlutterPhase * 0.73) * modAmt;
         }
@@ -696,16 +774,16 @@ public:
         double delayedR = readCubic(delayBufferR, writePos, delaySampR);
 
         // 4. Analog Saturation on Delayed Tap
-        if (analogMode == DelayAnalogMode::WarmTape) {
+        if (p.analogMode == DelayAnalogMode::WarmTape) {
             delayedL = std::tanh(delayedL * 1.15) * 0.95;
             delayedR = std::tanh(delayedR * 1.15) * 0.95;
-        } else if (analogMode == DelayAnalogMode::VintageTube) {
+        } else if (p.analogMode == DelayAnalogMode::VintageTube) {
             auto tubeSat = [](double x) noexcept -> double {
                 return (x > 0.0) ? (1.0 - std::exp(-x * 1.2)) : (-1.0 + std::exp(x * 0.9));
             };
             delayedL = tubeSat(delayedL);
             delayedR = tubeSat(delayedR);
-        } else if (analogMode == DelayAnalogMode::LoFi) {
+        } else if (p.analogMode == DelayAnalogMode::LoFi) {
             delayedL = std::clamp(std::round(delayedL * 128.0) / 128.0, -1.0, 1.0);
             delayedR = std::clamp(std::round(delayedR * 128.0) / 128.0, -1.0, 1.0);
         }
@@ -718,15 +796,15 @@ public:
         for (size_t i = 0; i < numLpfStagesR; ++i) delayedR = lpfStagesR[i].process(delayedR);
 
         // 6. Feedback & Crossfeed Accumulation
-        const double fbSignL = phaseInvFbL ? -1.0 : 1.0;
-        const double fbSignR = phaseInvFbR ? -1.0 : 1.0;
-        const double crossSignLR = phaseInvCrossLR ? -1.0 : 1.0;
-        const double crossSignRL = phaseInvCrossRL ? -1.0 : 1.0;
+        const double fbSignL = p.phaseInvFbL ? -1.0 : 1.0;
+        const double fbSignR = p.phaseInvFbR ? -1.0 : 1.0;
+        const double crossSignLR = p.phaseInvCrossLR ? -1.0 : 1.0;
+        const double crossSignRL = p.phaseInvCrossRL ? -1.0 : 1.0;
 
-        const double fbGainL = (feedbackPctL * 0.01) * fbSignL;
-        const double fbGainR = (feedbackPctR * 0.01) * fbSignR;
-        const double crossGainLR = (crossfeedPctLR * 0.01) * crossSignLR;
-        const double crossGainRL = (crossfeedPctRL * 0.01) * crossSignRL;
+        const double fbGainL = (p.feedbackPctL * 0.01) * fbSignL;
+        const double fbGainR = (p.feedbackPctR * 0.01) * fbSignR;
+        const double crossGainLR = (p.crossfeedPctLR * 0.01) * crossSignLR;
+        const double crossGainRL = (p.crossfeedPctRL * 0.01) * crossSignRL;
 
         const double nextBufInL = srcInL + (delayedL * fbGainL) + (delayedR * crossGainRL);
         const double nextBufInR = srcInR + (delayedR * fbGainR) + (delayedL * crossGainLR);
@@ -749,21 +827,21 @@ public:
         double wetPanLL = 1.0, wetPanLR = 0.0;
         double wetPanRL = 0.0, wetPanRR = 1.0;
 
-        panGains(dryPanL, dryPanLL, dryPanLR);
-        panGains(dryPanR, dryPanRL, dryPanRR);
-        panGains(wetPanL, wetPanLL, wetPanLR);
-        panGains(wetPanR, wetPanRL, wetPanRR);
+        panGains(p.dryPanL, dryPanLL, dryPanLR);
+        panGains(p.dryPanR, dryPanRL, dryPanRR);
+        panGains(p.wetPanL, wetPanLL, wetPanLR);
+        panGains(p.wetPanR, wetPanRL, wetPanRR);
 
-        const double dryL = dryInL * (dryLevelPctL * 0.01);
-        const double dryR = dryInR * (dryLevelPctR * 0.01);
-        const double wetL = delayedL * (wetLevelPctL * 0.01);
-        const double wetR = delayedR * (wetLevelPctR * 0.01);
+        const double dryL = dryInL * (p.dryLevelPctL * 0.01);
+        const double dryR = dryInR * (p.dryLevelPctR * 0.01);
+        const double wetL = delayedL * (p.wetLevelPctL * 0.01);
+        const double wetR = delayedR * (p.wetLevelPctR * 0.01);
 
         const double mixOutL = (dryL * dryPanLL + dryR * dryPanRL) + (wetL * wetPanLL + wetR * wetPanRL);
         const double mixOutR = (dryL * dryPanLR + dryR * dryPanRR) + (wetL * wetPanLR + wetR * wetPanRR);
 
         // Apply Output Gain (-24 dB to +24 dB)
-        const double outGainLin = std::pow(10.0, outGainDb * 0.05);
+        const double outGainLin = std::pow(10.0, p.outGainDb * 0.05);
         inOutL = sanitize(mixOutL * outGainLin);
         inOutR = sanitize(mixOutR * outGainLin);
 
@@ -831,11 +909,13 @@ private:
         }
 
         void setCoeffs(double b0_, double b1_, double b2_, double a1_, double a2_) noexcept {
+            std::lock_guard<std::mutex> lock(controlMutex_);
             b0 = b0_; b1 = b1_; b2 = b2_; a1 = a1_; a2 = a2_;
+            publishParamsLocked();
         }
     };
 
-    void updateFilters() noexcept {
+    void updateFilters(const Preset& p) noexcept {
         auto designHPF = [this](double freqHz, double q, BiquadSection& s) {
             const double w0 = 2.0 * std::numbers::pi * std::clamp(freqHz, 10.0, sampleRate * 0.45) / sampleRate;
             const double alpha = std::sin(w0) / (2.0 * q);
@@ -861,18 +941,33 @@ private:
         };
 
         // Determine number of cascaded stages from dB/oct slope (1 stage = 12 dB/oct, 2 = 24 dB/oct, 3 = 36, 4 = 48)
-        numHpfStagesL = std::clamp(static_cast<size_t>(std::round(hpfsDbL / 12.0)), size_t{1}, kMaxFilterStages);
-        numHpfStagesR = std::clamp(static_cast<size_t>(std::round(hpfsDbR / 12.0)), size_t{1}, kMaxFilterStages);
-        numLpfStagesL = std::clamp(static_cast<size_t>(std::round(lpfsDbL / 12.0)), size_t{1}, kMaxFilterStages);
-        numLpfStagesR = std::clamp(static_cast<size_t>(std::round(lpfsDbR / 12.0)), size_t{1}, kMaxFilterStages);
+        numHpfStagesL = std::clamp(static_cast<size_t>(std::round(p.hpfsDbL / 12.0)), size_t{1}, kMaxFilterStages);
+        numHpfStagesR = std::clamp(static_cast<size_t>(std::round(p.hpfsDbR / 12.0)), size_t{1}, kMaxFilterStages);
+        numLpfStagesL = std::clamp(static_cast<size_t>(std::round(p.lpfsDbL / 12.0)), size_t{1}, kMaxFilterStages);
+        numLpfStagesR = std::clamp(static_cast<size_t>(std::round(p.lpfsDbR / 12.0)), size_t{1}, kMaxFilterStages);
 
         for (size_t i = 0; i < kMaxFilterStages; ++i) {
-            designHPF(hpfHzL, 0.7071, hpfStagesL[i]);
-            designHPF(hpfHzR, 0.7071, hpfStagesR[i]);
-            designLPF(lpfHzL, 0.7071, lpfStagesL[i]);
-            designLPF(lpfHzR, 0.7071, lpfStagesR[i]);
+            designHPF(p.hpfHzL, 0.7071, hpfStagesL[i]);
+            designHPF(p.hpfHzR, 0.7071, hpfStagesR[i]);
+            designLPF(p.lpfHzL, 0.7071, lpfStagesL[i]);
+            designLPF(p.lpfHzR, 0.7071, lpfStagesR[i]);
         }
+        audioFilterSampleRate_ = sampleRate;
     }
+
+    void publishParamsLocked() noexcept {
+        ++controlRevision_;
+        auto snapshot = makeCurrentPreset();
+        snapshot.revision = controlRevision_;
+        publishedParams_.publish(snapshot);
+    }
+
+    mutable std::mutex controlMutex_;
+    uint64_t controlRevision_ = 1;
+    AtomicParameterSnapshot<Preset> publishedParams_;
+    Preset audioParams_{};
+    uint64_t audioRevision_ = 0;
+    double audioFilterSampleRate_ = 0.0;
 
     double sampleRate = 48000.0;
     double bpm = 120.0;
