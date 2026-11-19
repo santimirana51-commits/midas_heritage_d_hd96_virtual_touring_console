@@ -202,9 +202,8 @@ public:
   }
 
   HybridReverbParams getParams() const noexcept {
-    HybridReverbParams snapshot{};
-    publishedParams_.load(snapshot);
-    return snapshot;
+    std::lock_guard<std::mutex> lock(controlMutex_);
+    return params_;
   }
 
   void setParams(const HybridReverbParams &p) {
