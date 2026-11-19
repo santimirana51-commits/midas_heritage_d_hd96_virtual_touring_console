@@ -3773,7 +3773,7 @@ public:
 
     } else if (t == nova::graviton::FxType::Hybrid_Reverb) {
 
-      auto &p = slot.hybridReverb.getParams();
+      const auto p = slot.hybridReverb.getParams();
 
       paramLabels[0].setText("Reverb Decay (s):", juce::dontSendNotification);
 
@@ -3784,9 +3784,9 @@ public:
       paramSliders[0].setTextValueSuffix(" s");
 
       paramSliders[0].onValueChange = [&slot, this] {
-        slot.hybridReverb.getParams().decay =
-
-            static_cast<float>(paramSliders[0].getValue());
+        auto params = slot.hybridReverb.getParams();
+        params.decay = static_cast<float>(paramSliders[0].getValue());
+        slot.hybridReverb.setParams(params);
       };
 
       paramLabels[1].setText("Pre-Delay (ms):", juce::dontSendNotification);
@@ -3798,9 +3798,9 @@ public:
       paramSliders[1].setTextValueSuffix(" ms");
 
       paramSliders[1].onValueChange = [&slot, this] {
-        slot.hybridReverb.getParams().preDelayMs =
-
-            static_cast<float>(paramSliders[1].getValue());
+        auto params = slot.hybridReverb.getParams();
+        params.preDelayMs = static_cast<float>(paramSliders[1].getValue());
+        slot.hybridReverb.setParams(params);
       };
 
       paramLabels[2].setText("Room Size:", juce::dontSendNotification);
@@ -3812,9 +3812,9 @@ public:
       paramSliders[2].setTextValueSuffix("x");
 
       paramSliders[2].onValueChange = [&slot, this] {
-        slot.hybridReverb.getParams().size =
-
-            static_cast<float>(paramSliders[2].getValue());
+        auto params = slot.hybridReverb.getParams();
+        params.size = static_cast<float>(paramSliders[2].getValue());
+        slot.hybridReverb.setParams(params);
       };
 
       paramLabels[3].setText("High Damping:", juce::dontSendNotification);
@@ -3826,9 +3826,9 @@ public:
       paramSliders[3].setTextValueSuffix("");
 
       paramSliders[3].onValueChange = [&slot, this] {
-        slot.hybridReverb.getParams().highDamping =
-
-            static_cast<float>(paramSliders[3].getValue());
+        auto params = slot.hybridReverb.getParams();
+        params.highDamping = static_cast<float>(paramSliders[3].getValue());
+        slot.hybridReverb.setParams(params);
       };
 
       paramLabels[4].setText("Wet Mix (%):", juce::dontSendNotification);
@@ -3842,9 +3842,9 @@ public:
       paramSliders[4].setTextValueSuffix(" %");
 
       paramSliders[4].onValueChange = [&slot, this] {
-        slot.hybridReverb.getParams().dryWet =
-
-            static_cast<float>(paramSliders[4].getValue() * 0.01);
+        auto params = slot.hybridReverb.getParams();
+        params.dryWet = static_cast<float>(paramSliders[4].getValue() * 0.01);
+        slot.hybridReverb.setParams(params);
       };
 
       toggleParam.setVisible(false);
