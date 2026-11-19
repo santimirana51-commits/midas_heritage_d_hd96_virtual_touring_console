@@ -222,24 +222,30 @@ public:
       const double targetSampleRate = getSampleRate();
       if (std::abs(irSampleRate - targetSampleRate) > 1.0) {
         const double ratio = targetSampleRate / irSampleRate;
-        int newLen = static_cast<int>(irData.size() * ratio);
-        newLen = std::clamp(newLen, 1, MAX_IR_SAMPLES);
+        if (!std::isfinite(ratio) || ratio <= 0.0)
+          return false;
+
+        // Clamp in floating-point space before converting to int. Casting an
+        // out-of-range double (or size_t product) to int is undefined behavior.
+        const double requestedLength = static_cast<double>(irData.size()) * ratio;
+        const int newLen = static_cast<int>(std::clamp(
+            requestedLength, 1.0, static_cast<double>(MAX_IR_SAMPLES)));
         irL_.resize(static_cast<size_t>(newLen));
         irR_.resize(static_cast<size_t>(newLen));
+        const double lastSourceIndex = static_cast<double>(irData.size() - 1);
         for (int i = 0; i < newLen; ++i) {
-          const double srcPos = static_cast<double>(i) / ratio;
-          int idx = static_cast<int>(srcPos);
-          const float frac = static_cast<float>(srcPos - idx);
-          idx = std::min(idx, static_cast<int>(irData.size()) - 1);
-          const int idx2 = std::min(idx + 1, static_cast<int>(irData.size()) - 1);
-          const float val = irData[static_cast<size_t>(idx)] * (1.0f - frac) +
-                            irData[static_cast<size_t>(idx2)] * frac;
+          const double srcPos = std::clamp(
+              static_cast<double>(i) / ratio, 0.0, lastSourceIndex);
+          const size_t idx = static_cast<size_t>(srcPos);
+          const size_t idx2 = std::min(idx + 1, irData.size() - 1);
+          const float frac = static_cast<float>(srcPos - static_cast<double>(idx));
+          const float val = irData[idx] * (1.0f - frac) + irData[idx2] * frac;
           irL_[static_cast<size_t>(i)] = val;
           irR_[static_cast<size_t>(i)] = val;
         }
       } else {
-        const int len = std::min(static_cast<int>(irData.size()), MAX_IR_SAMPLES);
-        irL_.assign(irData.begin(), irData.begin() + len);
+        const size_t len = std::min(irData.size(), static_cast<size_t>(MAX_IR_SAMPLES));
+        irL_.assign(irData.begin(), irData.begin() + static_cast<std::ptrdiff_t>(len));
         irR_ = irL_;
       }
       irIsStereo_ = false;
