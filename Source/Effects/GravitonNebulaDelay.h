@@ -105,7 +105,9 @@ public:
         reset();
     }
 
+    // Call only while the audio callback is stopped: this clears DSP state.
     void reset() noexcept {
+        std::lock_guard<std::mutex> lock(controlMutex_);
         std::fill(delayBufferL.begin(), delayBufferL.end(), 0.0);
         std::fill(delayBufferR.begin(), delayBufferR.end(), 0.0);
         writePos = 0;
