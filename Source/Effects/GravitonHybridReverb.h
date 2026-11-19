@@ -531,7 +531,7 @@ private:
 
   HybridReverbParams params_; // control-thread-owned
   mutable std::mutex controlMutex_;
-  AtomicParameterSnapshot<HybridReverbParams> publishedParams_;
+  graviton::AtomicParameterSnapshot<HybridReverbParams> publishedParams_;
   HybridReverbParams audioParams_{}; // audio-thread-owned
   uint64_t controlRevision_ = 1;
   uint64_t audioRevision_ = 0;
