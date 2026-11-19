@@ -7017,6 +7017,23 @@ public:
     }
 
     // =========================================================================
+    // Suite 118D: Convolution IR resampling conversion bounds
+    // =========================================================================
+    beginTest("Suite 118D: Convolution IR resampling conversion bounds");
+    {
+      nova::ConvolutionReverbEngine conv;
+      conv.setSampleRate(1.0e300);
+      const std::vector<float> shortIr{0.0f, 0.25f, -0.25f, 0.0f};
+      expect(conv.loadIR(shortIr, 48000.0),
+             "Convolution: extreme finite resampling ratio is safely bounded");
+      float left = 0.1f;
+      float right = -0.1f;
+      conv.processStereo(left, right);
+      expect(std::isfinite(left) && std::isfinite(right),
+             "Convolution: bounded IR resampling produces finite output");
+    }
+
+    // =========================================================================
     // Suite 118A: Sample-rate-aware delay buffer capacity
     // =========================================================================
     beginTest("Suite 118A: Sample-rate-aware delay capacity");
