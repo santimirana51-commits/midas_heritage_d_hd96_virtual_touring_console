@@ -1937,7 +1937,8 @@ public:
     if (std::abs(sr - lastCallbackSampleRate) > 1.0) {
       lastCallbackSampleRate = sr;
       mainGraphicEQ.setSampleRate(static_cast<double>(sr));
-      effectsRack.setSampleRate(static_cast<double>(sr));
+      // EffectsRack sample-rate preparation can allocate/rebuild IR buffers.
+      // It is performed in audioDeviceAboutToStart(), never in processBlock().
       duganAutomixer.setSampleRate(static_cast<double>(sr));
       matrixPlusEngine.setSampleRate(static_cast<double>(sr));
       masterBusChain.setSampleRate(static_cast<double>(sr));
