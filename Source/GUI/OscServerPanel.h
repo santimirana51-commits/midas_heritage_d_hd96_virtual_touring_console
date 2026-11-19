@@ -35,13 +35,30 @@ public:
     portEditor.setInputRestrictions(5, "0123456789");
     addAndMakeVisible(portEditor);
 
+    allowlistLabel.setText("Trusted sender IPs:", juce::dontSendNotification);
+    allowlistLabel.setColour(juce::Label::textColourId, juce::Colour(0xffc9d1d9));
+    addAndMakeVisible(allowlistLabel);
+    allowlistEditor.setText("127.0.0.1, ::1");
+    allowlistEditor.setTextToShowWhenEmpty("192.168.1.25, 192.168.1.26", juce::Colour(0xff8b949e));
+    addAndMakeVisible(allowlistEditor);
+
     startBtn.setButtonText("START SERVER");
     startBtn.setColour(juce::TextButton::buttonColourId,
                        juce::Colour(0xff238636));
     startBtn.onClick = [this] {
       const int port = portEditor.getText().getIntValue();
-      if (port > 1024 && port < 65535)
+      if (port > 1024 && port < 65535) {
+        juce::StringArray ips;
+        ips.addTokens(allowlistEditor.getText(), ",", "");
+        ips.trim();
+        ips.removeEmptyStrings();
+        std::vector<juce::String> trusted;
+        trusted.reserve(static_cast<size_t>(ips.size()));
+        for (const auto &ip : ips)
+          trusted.push_back(ip);
+        engine.oscServer.setAllowedAddresses(trusted);
         engine.oscServer.startServer(port);
+      }
     };
     addAndMakeVisible(startBtn);
 
@@ -232,6 +249,9 @@ public:
     pingBtn.setBounds(ctrlRow.removeFromLeft(140).reduced(2));
     clearLogBtn.setBounds(ctrlRow.removeFromRight(90).reduced(2));
 
+    auto allowRow = area.removeFromTop(28);
+    allowlistLabel.setBounds(allowRow.removeFromLeft(125).reduced(0, 4));
+    allowlistEditor.setBounds(allowRow.reduced(2));
     statsLabel.setBounds(area.removeFromTop(20));
 
     // Log at the bottom
@@ -316,7 +336,7 @@ private:
       const int ch = channelFor(i);
       const auto &state = engine.channels[static_cast<size_t>(ch)];
 
-      const auto &nm = engine.channelNames[static_cast<size_t>(ch)];
+      const auto nm = engine.getChannelName(ch);
       s.name.setText(nm.isNotEmpty() ? nm : ("CH " + juce::String(ch + 1)),
                      juce::dontSendNotification);
 
@@ -385,9 +405,9 @@ private:
   MixerEngine &engine;
   int bank = 0;
 
-  juce::Label title, statusLed, portLabel, statsLabel, bankLabel, masterName,
+  juce::Label title, statusLed, portLabel, allowlistLabel, statsLabel, bankLabel, masterName,
       masterDbLabel;
-  juce::TextEditor portEditor, logEditor;
+  juce::TextEditor portEditor, allowlistEditor, logEditor;
   juce::TextButton startBtn, stopBtn, pingBtn, clearLogBtn, prevBankBtn,
       nextBankBtn, talkbackBtn;
   std::array<Strip, kStrips> strips;

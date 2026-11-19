@@ -2,7 +2,17 @@ cmake_minimum_required(VERSION 3.22)
 project(OPENLIVE_REFACTORED VERSION 1.1.0 LANGUAGES C CXX)
 
 option(USE_ASIO_SDK "Enable real ASIO SDK integration" OFF)
-option(NOVA_MAX_DELAY_MS "Maximum input delay in milliseconds" 500)
+set(NOVA_MAX_DELAY_MS "500" CACHE STRING
+    "Maximum input delay in milliseconds")
+if(NOT NOVA_MAX_DELAY_MS MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR "NOVA_MAX_DELAY_MS must be a positive integer")
+endif()
+if(NOVA_MAX_DELAY_MS GREATER 500)
+  message(FATAL_ERROR "NOVA_MAX_DELAY_MS cannot exceed 500")
+endif()
+
+set(JUCE_SOURCE_DIR "" CACHE PATH
+    "Optional path to an existing JUCE source checkout")
 
 include(CTest)
 
@@ -11,10 +21,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
-if(EXISTS "C:/Users/miran/JUCE")
+if(JUCE_SOURCE_DIR)
+  if(NOT EXISTS "${JUCE_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+      "JUCE_SOURCE_DIR does not contain a JUCE CMake project: ${JUCE_SOURCE_DIR}")
+  endif()
   FetchContent_Declare(
     JUCE
-    SOURCE_DIR "C:/Users/miran/JUCE"
+    SOURCE_DIR "${JUCE_SOURCE_DIR}"
   )
 else()
   FetchContent_Declare(

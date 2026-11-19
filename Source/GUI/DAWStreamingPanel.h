@@ -131,7 +131,7 @@ public:
             "--------------\n";
 
     for (int ch = 0; ch < 64; ++ch) {
-      const auto chName = engine.channelNames[static_cast<size_t>(ch)];
+      const auto chName = engine.getChannelName(ch);
       const juce::String label =
           chName.isEmpty() ? ("CH " + juce::String(ch + 1)) : chName;
       const int dawIn = engine.dawStreamer.getInputRouting(ch);

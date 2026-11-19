@@ -96,7 +96,7 @@ public:
     btnAutoPatchHw.onClick = [this] {
       engine.stageBoxPatchMatrix.autoPatchLocalInputs(0, 32);
       for (int c = 0; c < kLogicalChannels; ++c)
-        engine.channelNames[static_cast<size_t>(c)] = engine.stageBoxPatchMatrix.getChannelAutoLabel(c);
+        engine.setChannelName(c, engine.stageBoxPatchMatrix.getChannelAutoLabel(c));
       repaint();
     };
     addAndMakeVisible(btnAutoPatchHw);

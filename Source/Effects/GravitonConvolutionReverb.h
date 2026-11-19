@@ -18,6 +18,8 @@
 #include <atomic>
 #include <cmath>
 #include <complex>
+#include <cstring>
+#include <type_traits>
 #if __has_include(<juce_audio_formats/juce_audio_formats.h>)
 #include <juce_audio_formats/juce_audio_formats.h>
 #define NOVA_HAS_JUCE_AUDIO_FORMATS 1
@@ -166,88 +168,101 @@ public:
     loadFactoryPreset(0);
     slotA_ = params_;
     slotB_ = params_;
+    publishAudioParams(params_);
+    audioCachedParams_ = params_;
   }
 
   // ── Parameters ──
-  ConvReverbParams &getParams() { return params_; }
-  const ConvReverbParams &getParams() const { return params_; }
+  ConvReverbParams getParams() const {
+    std::lock_guard<std::mutex> lock(parameterMutex_);
+    return params_;
+  }
+
   void setParams(const ConvReverbParams &p) {
-    const bool needIrRebuild =
-        (std::abs(p.decayScale - params_.decayScale) > 0.001f ||
-         std::abs(p.sizePct - params_.sizePct) > 0.1f ||
-         std::abs(p.irStartTrim - params_.irStartTrim) > 0.001f ||
-         std::abs(p.irEndTrim - params_.irEndTrim) > 0.001f ||
-         p.reverseIR != params_.reverseIR ||
-         p.normalizeIR != params_.normalizeIR);
-    params_ = p;
-    updateToneFilters();
-    if (needIrRebuild && irLoaded_)
+    bool needIrRebuild = false;
+    {
+      std::lock_guard<std::mutex> lock(parameterMutex_);
+      needIrRebuild =
+          (std::abs(p.decayScale - params_.decayScale) > 0.001f ||
+           std::abs(p.sizePct - params_.sizePct) > 0.1f ||
+           std::abs(p.irStartTrim - params_.irStartTrim) > 0.001f ||
+           std::abs(p.irEndTrim - params_.irEndTrim) > 0.001f ||
+           p.reverseIR != params_.reverseIR ||
+           p.normalizeIR != params_.normalizeIR);
+      params_ = p;
+      // Publish while holding the same writer lock so concurrent control
+      // updates cannot publish out of order relative to params_.
+      publishAudioParams(p);
+    }
+    if (needIrRebuild && irLoaded_.load(std::memory_order_acquire))
       prepareIR();
   }
 
   void refreshIRProcessing() {
-    updateToneFilters();
-    if (irLoaded_)
+    if (irLoaded_.load(std::memory_order_acquire))
       prepareIR();
   }
 
   void setSampleRate(double sr) {
     if (sr > 1000.0 && std::isfinite(sr)) {
-      sampleRate_ = sr;
-      updateToneFilters();
-      if (irLoaded_)
+      sampleRate_.store(sr, std::memory_order_release);
+      if (irLoaded_.load(std::memory_order_acquire))
         prepareIR();
     }
   }
-  double getSampleRate() const { return sampleRate_; }
+  double getSampleRate() const { return sampleRate_.load(std::memory_order_acquire); }
 
   // ── Load IR ──
   bool loadIR(const std::vector<float> &irData, double irSampleRate = 48000.0) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (irData.empty())
+    if (irData.empty() || !std::isfinite(irSampleRate) || irSampleRate <= 0.0)
       return false;
 
-    if (std::abs(irSampleRate - sampleRate_) > 1.0) {
-      double ratio = sampleRate_ / irSampleRate;
-      int newLen = static_cast<int>(irData.size() * ratio);
-      newLen = std::min(newLen, MAX_IR_SAMPLES);
-      irL_.resize(static_cast<size_t>(newLen));
-      irR_.resize(static_cast<size_t>(newLen));
-      for (int i = 0; i < newLen; ++i) {
-        double srcPos = static_cast<double>(i) / ratio;
-        int idx = static_cast<int>(srcPos);
-        float frac = static_cast<float>(srcPos - idx);
-        idx = std::min(idx, static_cast<int>(irData.size()) - 1);
-        int idx2 = std::min(idx + 1, static_cast<int>(irData.size()) - 1);
-        float val = irData[static_cast<size_t>(idx)] * (1.0f - frac) +
-                    irData[static_cast<size_t>(idx2)] * frac;
-        irL_[static_cast<size_t>(i)] = val;
-        irR_[static_cast<size_t>(i)] = val;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const double targetSampleRate = getSampleRate();
+      if (std::abs(irSampleRate - targetSampleRate) > 1.0) {
+        const double ratio = targetSampleRate / irSampleRate;
+        int newLen = static_cast<int>(irData.size() * ratio);
+        newLen = std::clamp(newLen, 1, MAX_IR_SAMPLES);
+        irL_.resize(static_cast<size_t>(newLen));
+        irR_.resize(static_cast<size_t>(newLen));
+        for (int i = 0; i < newLen; ++i) {
+          const double srcPos = static_cast<double>(i) / ratio;
+          int idx = static_cast<int>(srcPos);
+          const float frac = static_cast<float>(srcPos - idx);
+          idx = std::min(idx, static_cast<int>(irData.size()) - 1);
+          const int idx2 = std::min(idx + 1, static_cast<int>(irData.size()) - 1);
+          const float val = irData[static_cast<size_t>(idx)] * (1.0f - frac) +
+                            irData[static_cast<size_t>(idx2)] * frac;
+          irL_[static_cast<size_t>(i)] = val;
+          irR_[static_cast<size_t>(i)] = val;
+        }
+      } else {
+        const int len = std::min(static_cast<int>(irData.size()), MAX_IR_SAMPLES);
+        irL_.assign(irData.begin(), irData.begin() + len);
+        irR_ = irL_;
       }
-    } else {
-      int len = std::min(static_cast<int>(irData.size()), MAX_IR_SAMPLES);
-      irL_.assign(irData.begin(), irData.begin() + len);
-      irR_ = irL_;
+      irIsStereo_ = false;
+      irLoaded_.store(true, std::memory_order_release);
     }
-
-    irIsStereo_ = false;
-    irLoaded_ = true;
     prepareIR();
     return true;
   }
 
   bool loadStereoIR(const std::vector<float> &left,
                     const std::vector<float> &right) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    int len = std::min({static_cast<int>(left.size()),
-                        static_cast<int>(right.size()), MAX_IR_SAMPLES});
-    if (len == 0)
+    const int len = std::min({static_cast<int>(left.size()),
+                              static_cast<int>(right.size()), MAX_IR_SAMPLES});
+    if (len <= 0)
       return false;
 
-    irL_.assign(left.begin(), left.begin() + len);
-    irR_.assign(right.begin(), right.begin() + len);
-    irIsStereo_ = true;
-    irLoaded_ = true;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      irL_.assign(left.begin(), left.begin() + len);
+      irR_.assign(right.begin(), right.begin() + len);
+      irIsStereo_ = true;
+      irLoaded_.store(true, std::memory_order_release);
+    }
     prepareIR();
     return true;
   }
@@ -286,13 +301,15 @@ public:
     currentPresetIdx_ = std::clamp(idx, 0, kNumFactoryPresets - 1);
     const auto &e = lib[static_cast<size_t>(currentPresetIdx_)];
 
-    params_.preDelayMs = e.preDelayMs;
-    params_.dryWet = e.dryWet;
-    params_.reverseIR = e.reverse;
-    params_.decayScale = 1.0f;
-    params_.sizePct = 100.0f;
-    params_.irStartTrim = 0.0f;
-    params_.irEndTrim = 1.0f;
+    auto p = getParams();
+    p.preDelayMs = e.preDelayMs;
+    p.dryWet = e.dryWet;
+    p.reverseIR = e.reverse;
+    p.decayScale = 1.0f;
+    p.sizePct = 100.0f;
+    p.irStartTrim = 0.0f;
+    p.irEndTrim = 1.0f;
+    setParams(p);
     irFileName_ = e.fileName;
     irIsStereo_ = true;
 
@@ -301,7 +318,9 @@ public:
 
   // Legacy preset loader (preserved)
   void loadPreset(IRPreset preset) {
-    params_.preset = preset;
+    auto p = getParams();
+    p.preset = preset;
+    setParams(p);
     switch (preset) {
     case IRPreset::Hall_Large: loadFactoryPreset(0); break;
     case IRPreset::Hall_Small: loadFactoryPreset(2); break;
@@ -321,17 +340,18 @@ public:
   void selectSlotB(bool useB) {
     if (useB == activeSlotB_)
       return;
+    const auto currentParams = getParams();
     if (activeSlotB_)
-      slotB_ = params_;
+      slotB_ = currentParams;
     else
-      slotA_ = params_;
+      slotA_ = currentParams;
     activeSlotB_ = useB;
     setParams(activeSlotB_ ? slotB_ : slotA_);
   }
   bool isSlotB() const { return activeSlotB_; }
 
   void saveUserPreset() {
-    userSaved_ = params_;
+    userSaved_ = getParams();
     hasUserSaved_ = true;
   }
   bool hasUserPreset() const { return hasUserSaved_; }
@@ -360,7 +380,7 @@ public:
     return static_cast<int>(ir.L.size());
   }
   float getIRDurationSec() const {
-    return static_cast<float>(getIRLength()) / static_cast<float>(sampleRate_);
+    return static_cast<float>(getIRLength()) / static_cast<float>(getSampleRate());
   }
 
   float getInputLevelDbL() const {
@@ -406,11 +426,27 @@ public:
     updateMeter(inLevelDbL_, dryL);
     updateMeter(inLevelDbR_, dryR);
 
+    refreshAudioParams();
+    const auto &audioParams = audioCachedParams_;
+    const double currentSampleRate = getSampleRate();
+    if (!audioFilterParamsValid_ ||
+        currentSampleRate != audioFilterSampleRate_ ||
+        audioParams.loCutHz != audioFilterParams_.loCutHz ||
+        audioParams.hiCutHz != audioFilterParams_.hiCutHz ||
+        audioParams.lowShelfGain != audioFilterParams_.lowShelfGain ||
+        audioParams.midEqGain != audioFilterParams_.midEqGain ||
+        audioParams.highShelfGain != audioFilterParams_.highShelfGain) {
+      updateToneFilters(audioParams);
+      audioFilterParams_ = audioParams;
+      audioFilterSampleRate_ = currentSampleRate;
+      audioFilterParamsValid_ = true;
+    }
+
     const int sIdx = activeSlot_.load(std::memory_order_acquire);
     audioInSlot_.store(sIdx, std::memory_order_release);
     const auto &ir = irSlots_[static_cast<size_t>(sIdx)];
 
-    if (params_.bypassed || !irLoaded_ || ir.L.empty() || inputBufL_.empty()) {
+    if (audioParams.bypassed || !irLoaded_.load(std::memory_order_acquire) || ir.L.empty() || inputBufL_.empty()) {
       audioInSlot_.store(-1, std::memory_order_release);
       updateMeter(outLevelDbL_, dryL);
       updateMeter(outLevelDbR_, dryR);
@@ -420,8 +456,8 @@ public:
     // 1. Pre-delay
     double delayedL = dryL, delayedR = dryR;
     const int pdSize = static_cast<int>(preDelayBufL_.size());
-    if (params_.preDelayMs > 0.0f && pdSize > 1) {
-      int delaySamples = static_cast<int>(params_.preDelayMs * sampleRate_ / 1000.0);
+    if (audioParams.preDelayMs > 0.0f && pdSize > 1) {
+      int delaySamples = static_cast<int>(audioParams.preDelayMs * getSampleRate() / 1000.0);
       delaySamples = std::clamp(delaySamples, 0, pdSize - 1);
       if (delaySamples > 0) {
         preDelayBufL_[static_cast<size_t>(preDelayPos_)] = static_cast<float>(dryL);
@@ -458,40 +494,40 @@ public:
     audioInSlot_.store(-1, std::memory_order_release);
 
     // 4. IR Filtering (Lo Cut / Hi Cut) & 3-Band EQ
-    if (params_.loCutEnabled) {
+    if (audioParams.loCutEnabled) {
       wetL = loCutL_.process(wetL);
       wetR = loCutR_.process(wetR);
     }
-    if (params_.hiCutEnabled) {
+    if (audioParams.hiCutEnabled) {
       wetL = hiCutL_.process(wetL);
       wetR = hiCutR_.process(wetR);
     }
-    if (params_.eqEnabled) {
-      if (std::abs(params_.lowShelfGain) > 0.05f) {
+    if (audioParams.eqEnabled) {
+      if (std::abs(audioParams.lowShelfGain) > 0.05f) {
         wetL = eqLowL_.process(wetL);
         wetR = eqLowR_.process(wetR);
       }
-      if (std::abs(params_.midEqGain) > 0.05f) {
+      if (std::abs(audioParams.midEqGain) > 0.05f) {
         wetL = eqMidL_.process(wetL);
         wetR = eqMidR_.process(wetR);
       }
-      if (std::abs(params_.highShelfGain) > 0.05f) {
+      if (std::abs(audioParams.highShelfGain) > 0.05f) {
         wetL = eqHighL_.process(wetL);
         wetR = eqHighR_.process(wetR);
       }
     }
 
     // 5. Stereo Width
-    if (std::abs(params_.stereoWidth - 1.0f) > 0.01f) {
+    if (std::abs(audioParams.stereoWidth - 1.0f) > 0.01f) {
       const double mid = (wetL + wetR) * 0.5;
-      const double side = (wetL - wetR) * 0.5 * params_.stereoWidth;
+      const double side = (wetL - wetR) * 0.5 * audioParams.stereoWidth;
       wetL = mid + side;
       wetR = mid - side;
     }
 
     // 6. Dry/Wet Mix
-    const double outL = dryL * (1.0 - params_.dryWet) + wetL * params_.dryWet;
-    const double outR = dryR * (1.0 - params_.dryWet) + wetR * params_.dryWet;
+    const double outL = dryL * (1.0 - audioParams.dryWet) + wetL * audioParams.dryWet;
+    const double outR = dryR * (1.0 - audioParams.dryWet) + wetR * audioParams.dryWet;
 
     left = std::isfinite(outL) ? static_cast<float>(std::clamp(outL, -4.0, 4.0)) : 0.0f;
     right = std::isfinite(outR) ? static_cast<float>(std::clamp(outR, -4.0, 4.0)) : 0.0f;
@@ -520,20 +556,21 @@ public:
 
 #if NOVA_HAS_JUCE_CORE
   juce::var toVar() const {
+    const auto p = getParams();
     auto obj = new juce::DynamicObject();
-    obj->setProperty("preset", static_cast<int>(params_.preset));
-    obj->setProperty("dryWet", static_cast<double>(params_.dryWet));
-    obj->setProperty("preDelayMs", static_cast<double>(params_.preDelayMs));
-    obj->setProperty("decayScale", static_cast<double>(params_.decayScale));
-    obj->setProperty("sizePct", static_cast<double>(params_.sizePct));
-    obj->setProperty("stereoWidth", static_cast<double>(params_.stereoWidth));
-    obj->setProperty("loCutHz", static_cast<double>(params_.loCutHz));
-    obj->setProperty("hiCutHz", static_cast<double>(params_.hiCutHz));
-    obj->setProperty("lowShelfGain", static_cast<double>(params_.lowShelfGain));
-    obj->setProperty("midEqGain", static_cast<double>(params_.midEqGain));
-    obj->setProperty("highShelfGain", static_cast<double>(params_.highShelfGain));
-    obj->setProperty("reverseIR", params_.reverseIR);
-    obj->setProperty("normalizeIR", params_.normalizeIR);
+    obj->setProperty("preset", static_cast<int>(p.preset));
+    obj->setProperty("dryWet", static_cast<double>(p.dryWet));
+    obj->setProperty("preDelayMs", static_cast<double>(p.preDelayMs));
+    obj->setProperty("decayScale", static_cast<double>(p.decayScale));
+    obj->setProperty("sizePct", static_cast<double>(p.sizePct));
+    obj->setProperty("stereoWidth", static_cast<double>(p.stereoWidth));
+    obj->setProperty("loCutHz", static_cast<double>(p.loCutHz));
+    obj->setProperty("hiCutHz", static_cast<double>(p.hiCutHz));
+    obj->setProperty("lowShelfGain", static_cast<double>(p.lowShelfGain));
+    obj->setProperty("midEqGain", static_cast<double>(p.midEqGain));
+    obj->setProperty("highShelfGain", static_cast<double>(p.highShelfGain));
+    obj->setProperty("reverseIR", p.reverseIR);
+    obj->setProperty("normalizeIR", p.normalizeIR);
     return juce::var(obj);
   }
 #endif
@@ -547,13 +584,15 @@ private:
 
   void generateSyntheticIR(float durationSec, float decayTime, float earlyLevel,
                            float density) {
-    const int irLen = std::clamp(static_cast<int>(sampleRate_ * durationSec),
+    const double sr = getSampleRate();
+    const int irLen = std::clamp(static_cast<int>(sr * durationSec),
                                  1024, MAX_IR_SAMPLES);
-    std::lock_guard<std::mutex> lock(mutex_);
-    irL_.resize(static_cast<size_t>(irLen));
-    irR_.resize(static_cast<size_t>(irLen));
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      irL_.resize(static_cast<size_t>(irLen));
+      irR_.resize(static_cast<size_t>(irLen));
 
-    unsigned int seed = 12345u + static_cast<unsigned int>(currentPresetIdx_ * 7919);
+      unsigned int seed = 12345u + static_cast<unsigned int>(currentPresetIdx_ * 7919);
     auto pseudoRand = [&seed]() -> float {
       seed = seed * 1103515245u + 12345u;
       return (static_cast<float>(seed & 0x7FFFFFFF) /
@@ -563,25 +602,30 @@ private:
     };
 
     for (int i = 0; i < irLen; ++i) {
-      const float t = static_cast<float>(i) / static_cast<float>(sampleRate_);
+      const float t = static_cast<float>(i) / static_cast<float>(sr);
       const float env = std::exp(-3.0f * t / std::max(0.1f, decayTime));
       float early = 0.0f;
       if (t < 0.06f) {
         static constexpr int erMs[] = {4, 9, 15, 21, 29, 37, 46, 54};
         for (int er : erMs) {
-          if (i == static_cast<int>(er * sampleRate_ / 1000.0))
+          if (i == static_cast<int>(er * sr / 1000.0))
             early = earlyLevel * (pseudoRand() > 0.0f ? 1.0f : -1.0f);
         }
       }
       irL_[static_cast<size_t>(i)] = early + pseudoRand() * env * density;
-      irR_[static_cast<size_t>(i)] = early + pseudoRand() * env * density;
+        irR_[static_cast<size_t>(i)] = early + pseudoRand() * env * density;
+      }
     }
 
-    irLoaded_ = true;
+    irLoaded_.store(true, std::memory_order_release);
     prepareIR();
   }
 
   void prepareIR() {
+    // Serialize IR source mutation with IR preparation. This mutex is only
+    // taken by control/file-loading threads, never by processStereo().
+    std::lock_guard<std::mutex> irLock(mutex_);
+    const auto p = getParams();
     if (irL_.empty())
       return;
     const int writeSlot = 1 - activeSlot_.load(std::memory_order_relaxed);
@@ -591,13 +635,13 @@ private:
 
     auto &dst = irSlots_[static_cast<size_t>(writeSlot)];
     const int fullLen = static_cast<int>(irL_.size());
-    const int startSample = std::clamp(static_cast<int>(params_.irStartTrim * fullLen), 0, fullLen - 1);
-    int endSample = std::clamp(static_cast<int>(params_.irEndTrim * fullLen), startSample + 64, fullLen);
+    const int startSample = std::clamp(static_cast<int>(p.irStartTrim * fullLen), 0, fullLen - 1);
+    int endSample = std::clamp(static_cast<int>(p.irEndTrim * fullLen), startSample + 64, fullLen);
     if (endSample <= startSample)
       endSample = fullLen;
 
     const int trimmedLen = endSample - startSample;
-    const double sizeRatio = std::clamp(params_.sizePct / 100.0, 0.5, 2.0);
+    const double sizeRatio = std::clamp(p.sizePct / 100.0, 0.5, 2.0);
     const int stretchedLen = std::clamp(static_cast<int>(trimmedLen * sizeRatio), 256, MAX_IR_SAMPLES);
 
     dst.L.resize(static_cast<size_t>(stretchedLen));
@@ -605,16 +649,16 @@ private:
 
     for (int i = 0; i < stretchedLen; ++i) {
       const double normPos = static_cast<double>(i) / static_cast<double>(stretchedLen);
-      const double srcPos = params_.reverseIR ? (1.0 - normPos) : normPos;
+      const double srcPos = p.reverseIR ? (1.0 - normPos) : normPos;
       const int srcIdx = std::clamp(startSample + static_cast<int>(srcPos * (trimmedLen - 1)),
                                     0, fullLen - 1);
       const float envScale = std::pow(1.0f - static_cast<float>(normPos),
-                                      1.0f / std::max(0.2f, params_.decayScale));
+                                      1.0f / std::max(0.2f, p.decayScale));
       dst.L[static_cast<size_t>(i)] = irL_[static_cast<size_t>(srcIdx)] * envScale;
       dst.R[static_cast<size_t>(i)] = irR_[static_cast<size_t>(srcIdx)] * envScale;
     }
 
-    if (params_.normalizeIR) {
+    if (p.normalizeIR) {
       float maxVal = 0.0f;
       for (float v : dst.L) maxVal = std::max(maxVal, std::abs(v));
       for (float v : dst.R) maxVal = std::max(maxVal, std::abs(v));
@@ -643,16 +687,49 @@ private:
     activeSlot_.store(writeSlot, std::memory_order_release);
   }
 
-  void updateToneFilters() {
-    const double sr = std::max(8000.0, sampleRate_);
-    const auto lc = graviton::makeButterworthHPF(sr, std::clamp<double>(params_.loCutHz, 20.0, 500.0));
-    const auto hc = graviton::makeButterworthLPF(sr, std::clamp<double>(params_.hiCutHz, 1000.0, sr * 0.45));
+  static constexpr size_t kParamWordCount =
+      (sizeof(ConvReverbParams) + sizeof(uint32_t) - 1) / sizeof(uint32_t);
+  static_assert(std::is_trivially_copyable_v<ConvReverbParams>);
+  static_assert(std::atomic<uint32_t>::is_always_lock_free,
+                "Audio parameter publication requires lock-free 32-bit atomics");
+
+  void publishAudioParams(const ConvReverbParams &p) {
+    std::lock_guard<std::mutex> writerLock(parameterPublishMutex_);
+    std::array<uint32_t, kParamWordCount> words{};
+    std::memcpy(words.data(), &p, sizeof(p));
+    audioParamsVersion_.fetch_add(1, std::memory_order_acq_rel); // odd: write in progress
+    for (size_t i = 0; i < words.size(); ++i)
+      audioParamWords_[i].store(words[i], std::memory_order_relaxed);
+    audioParamsVersion_.fetch_add(1, std::memory_order_release); // even: published
+  }
+
+  void refreshAudioParams() noexcept {
+    for (int attempt = 0; attempt < 2; ++attempt) {
+      const uint32_t before = audioParamsVersion_.load(std::memory_order_acquire);
+      if ((before & 1u) != 0u)
+        continue;
+      std::array<uint32_t, kParamWordCount> words{};
+      for (size_t i = 0; i < words.size(); ++i)
+        words[i] = audioParamWords_[i].load(std::memory_order_relaxed);
+      const uint32_t after = audioParamsVersion_.load(std::memory_order_acquire);
+      if (before == after && (after & 1u) == 0u) {
+        std::memcpy(&audioCachedParams_, words.data(), sizeof(audioCachedParams_));
+        return;
+      }
+    }
+    // Never spin or wait on the audio thread; retain the last coherent snapshot.
+  }
+
+  void updateToneFilters(const ConvReverbParams &p) {
+    const double sr = std::max(8000.0, getSampleRate());
+    const auto lc = graviton::makeButterworthHPF(sr, std::clamp<double>(p.loCutHz, 20.0, 500.0));
+    const auto hc = graviton::makeButterworthLPF(sr, std::clamp<double>(p.hiCutHz, 1000.0, sr * 0.45));
     loCutL_.setCoefficients(lc); loCutR_.setCoefficients(lc);
     hiCutL_.setCoefficients(hc); hiCutR_.setCoefficients(hc);
 
-    const auto eqL = graviton::makePeakingEq(sr, 160.0, params_.lowShelfGain, 0.7);
-    const auto eqM = graviton::makePeakingEq(sr, 1400.0, params_.midEqGain, 0.8);
-    const auto eqH = graviton::makePeakingEq(sr, 7500.0, params_.highShelfGain, 0.7);
+    const auto eqL = graviton::makePeakingEq(sr, 160.0, p.lowShelfGain, 0.7);
+    const auto eqM = graviton::makePeakingEq(sr, 1400.0, p.midEqGain, 0.8);
+    const auto eqH = graviton::makePeakingEq(sr, 7500.0, p.highShelfGain, 0.7);
     eqLowL_.setCoefficients(eqL); eqLowR_.setCoefficients(eqL);
     eqMidL_.setCoefficients(eqM); eqMidR_.setCoefficients(eqM);
     eqHighL_.setCoefficients(eqH); eqHighR_.setCoefficients(eqH);
@@ -668,7 +745,15 @@ private:
   }
 
   ConvReverbParams params_;
-  double sampleRate_ = 48000.0;
+  mutable std::mutex parameterMutex_;
+  std::mutex parameterPublishMutex_;
+  std::array<std::atomic<uint32_t>, kParamWordCount> audioParamWords_{};
+  std::atomic<uint32_t> audioParamsVersion_{0};
+  ConvReverbParams audioCachedParams_{};
+  ConvReverbParams audioFilterParams_{};
+  bool audioFilterParamsValid_ = false;
+  double audioFilterSampleRate_ = 0.0;
+  std::atomic<double> sampleRate_{48000.0};
   int currentPresetIdx_ = 0;
   std::string irFileName_{"Large_Concert_Hall.wav"};
   bool irIsStereo_ = true;
@@ -679,7 +764,7 @@ private:
   };
 
   std::vector<float> irL_, irR_;
-  bool irLoaded_ = false;
+  std::atomic<bool> irLoaded_{false};
   std::array<IRBuffer, 2> irSlots_;
   std::atomic<int> activeSlot_{0};
   std::atomic<int> audioInSlot_{-1};

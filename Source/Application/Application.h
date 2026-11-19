@@ -11,11 +11,16 @@
 namespace nova {
 
 inline void appendStartupLog(const std::string &msg) {
-  std::ofstream ofs("C:\\Users\\miran\\Documents\\WORKSPACE\\OPENLIVE_"
-                    "REFACTORED\\app_startup.log",
-                    std::ios::app);
+  const auto logDirectory =
+      juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+          .getChildFile("OPENLIVE_HD");
+  if (logDirectory.createDirectory().failed())
+    return;
+
+  const auto logFile = logDirectory.getChildFile("app_startup.log");
+  std::ofstream ofs(logFile.getFullPathName().toStdString(), std::ios::app);
   if (ofs.is_open()) {
-    ofs << msg << "\n";
+    ofs << msg << std::endl;
     ofs.flush();
   }
 }

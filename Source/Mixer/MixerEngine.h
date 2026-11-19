@@ -1,4 +1,8 @@
 #pragma once
+
+#ifndef NOVA_MAX_DELAY_MS
+#define NOVA_MAX_DELAY_MS 500
+#endif
 #include "Audio/AudioBufferOps.h"
 #include "Audio/GainSmoothing.h"
 #include "Audio/GravitonASIOStreamer.h"
@@ -50,6 +54,7 @@
 #include <atomic>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <utility>
@@ -174,6 +179,21 @@ public:
   // & 31)
   nova::graviton::StageBoxPatchMatrix stageBoxPatchMatrix;
   std::array<juce::String, kLogicalChannels> channelNames{};
+  mutable juce::CriticalSection channelNameLock;
+
+  juce::String getChannelName(int channelIndex) const {
+    if (channelIndex < 0 || channelIndex >= kLogicalChannels)
+      return {};
+    const juce::ScopedLock lock(channelNameLock);
+    return channelNames[static_cast<size_t>(channelIndex)];
+  }
+
+  void setChannelName(int channelIndex, const juce::String &value) {
+    if (channelIndex < 0 || channelIndex >= kLogicalChannels)
+      return;
+    const juce::ScopedLock lock(channelNameLock);
+    channelNames[static_cast<size_t>(channelIndex)] = value;
+  }
   std::array<double, nova::graviton::StageBoxPatchMatrix::kTotalOutputPorts>
       stageBoxOutputSamples{};
   // Phase 85: Multichannel Surround & Immersive Panning 5.1 / 7.1 / LCR &
@@ -208,6 +228,15 @@ public:
   void handleOscMessage(const nova::graviton::OscMessage &msg,
                         const juce::String &clientIp, int clientPort) {
     logOsc("RX: " + msg.address + " (" + msg.typeTags + ")");
+
+    // Reject non-finite numeric input before clamping or publishing DSP controls.
+    // std::clamp does not sanitize NaN because all comparisons with NaN are false.
+    for (const float value : msg.floatArgs) {
+      if (!std::isfinite(value)) {
+        logOsc("DROP: non-finite OSC float");
+        return;
+      }
+    }
 
     // /ch/{id}/mix/fader [float] or /ch/{id}/fader [float]
     if (msg.address.rfind("/ch/", 0) == 0) {
@@ -261,7 +290,7 @@ public:
                              std::memory_order_relaxed);
         } else if ((sub == "config/name" || sub == "name") &&
                    !msg.stringArgs.empty()) {
-          channelNames[cIdx] = juce::String(msg.stringArgs[0]);
+          setChannelName(static_cast<int>(cIdx), juce::String(msg.stringArgs[0]));
         }
       }
     } else if (msg.address == "/main/fader" && !msg.floatArgs.empty()) {
@@ -368,7 +397,16 @@ public:
   nova::graviton::SignalGenerator signalGenerator;
   double oscGainSmooth = 0.0;
   // Phase 72: Input Delay Line (max 500 ms @ 96 kHz = 48000 samples)
-  static constexpr int kMaxDelaySamples = 48000;
+  static constexpr int kMaxDelaySamples = NOVA_MAX_DELAY_MS * 96;
+  static int calculateMaxDelaySamples(double sampleRateHz) noexcept {
+    if (!std::isfinite(sampleRateHz) || sampleRateHz <= 0.0)
+      return 1;
+    const double samples =
+        std::ceil(sampleRateHz * static_cast<double>(NOVA_MAX_DELAY_MS) / 1000.0);
+    return static_cast<int>(std::clamp(
+        samples, 1.0, static_cast<double>(std::numeric_limits<int>::max())));
+  }
+  int maxDelaySamples = kMaxDelaySamples;
   std::vector<std::vector<double>> channelDelayBuffers;
   std::array<int, kLogicalChannels> channelDelayWritePos{};
   // Phase 75: Dual Solo Bus Architecture (Solo A & Solo B) & Monitor Section
@@ -1159,7 +1197,21 @@ public:
     deviceFailure.store(false, std::memory_order_relaxed);
     lastDeviceError.clear();
     deviceStartCount.fetch_add(1, std::memory_order_relaxed);
-    sampleRate.store(device->getCurrentSampleRate());
+    const double deviceSampleRate = device->getCurrentSampleRate();
+    sampleRate.store(deviceSampleRate);
+    // This callback runs before processBlock resumes. Resize here, never from
+    // the real-time audio callback, so the configured delay remains accurate
+    // at 44.1/48/88.2/96/176.4/192 kHz and other supported rates.
+    maxDelaySamples = calculateMaxDelaySamples(deviceSampleRate);
+    for (auto &buffer : channelDelayBuffers)
+      buffer.assign(static_cast<size_t>(maxDelaySamples), 0.0);
+    channelDelayWritePos.fill(0);
+    masterDelayBufL.assign(static_cast<size_t>(maxDelaySamples), 0.0);
+    masterDelayBufR.assign(static_cast<size_t>(maxDelaySamples), 0.0);
+    monitorDelayBufL.assign(static_cast<size_t>(maxDelaySamples), 0.0);
+    monitorDelayBufR.assign(static_cast<size_t>(maxDelaySamples), 0.0);
+    masterDelayWritePos = 0;
+    monitorDelayWritePos = 0;
     if (monitorFifoL.size() < static_cast<size_t>(kMonitorFifoCapacity)) {
       monitorFifoL.assign(static_cast<size_t>(kMonitorFifoCapacity), 0.0f);
       monitorFifoR.assign(static_cast<size_t>(kMonitorFifoCapacity), 0.0f);
@@ -2150,14 +2202,14 @@ public:
           const int delaySamples =
               std::clamp(static_cast<int>(std::round(
                              static_cast<double>(delayMs) * 0.001 * sr)),
-                         0, kMaxDelaySamples - 1);
+                         0, maxDelaySamples - 1);
           auto &delayBuf = channelDelayBuffers[channelIndex];
           int &wPos = channelDelayWritePos[channelIndex];
           delayBuf[static_cast<size_t>(wPos)] = preEqSignal;
           const int rPos =
-              (wPos - delaySamples + kMaxDelaySamples) % kMaxDelaySamples;
+              (wPos - delaySamples + maxDelaySamples) % maxDelaySamples;
           preEqSignal = delayBuf[static_cast<size_t>(rPos)];
-          wPos = (wPos + 1) % kMaxDelaySamples;
+          wPos = (wPos + 1) % maxDelaySamples;
         }
 
         blockTrimmedPeaks[channelIndex] =
@@ -2710,7 +2762,7 @@ public:
       // Monitor Output Delay Line (Time Alignment)
       if (monDelMsBlock > 0.001f && !monitorDelayBufL.empty()) {
         const int delSamp =
-            juce::jlimit(0, kMaxDelaySamples - 1,
+            juce::jlimit(0, maxDelaySamples - 1,
                          static_cast<int>(std::round(
                              static_cast<double>(monDelMsBlock) * 0.001 * sr)));
         monitorDelayBufL[static_cast<size_t>(monitorDelayWritePos)] =
@@ -2718,11 +2770,11 @@ public:
         monitorDelayBufR[static_cast<size_t>(monitorDelayWritePos)] =
             finalMonR_A;
         const int readPos =
-            (monitorDelayWritePos - delSamp + kMaxDelaySamples) %
-            kMaxDelaySamples;
+            (monitorDelayWritePos - delSamp + maxDelaySamples) %
+            maxDelaySamples;
         finalMonL_A = monitorDelayBufL[static_cast<size_t>(readPos)];
         finalMonR_A = monitorDelayBufR[static_cast<size_t>(readPos)];
-        monitorDelayWritePos = (monitorDelayWritePos + 1) % kMaxDelaySamples;
+        monitorDelayWritePos = (monitorDelayWritePos + 1) % maxDelaySamples;
       }
       // Matrix masters are smoothed once per sample. The Matrix calculation
       // itself consumes double Main/AUX samples and only narrows at the
@@ -2800,16 +2852,16 @@ public:
       const float mstDelMs = masterDelayMs.load(std::memory_order_relaxed);
       if (mstDelMs > 0.001f && !masterDelayBufL.empty()) {
         const int delSamp =
-            juce::jlimit(0, kMaxDelaySamples - 1,
+            juce::jlimit(0, maxDelaySamples - 1,
                          static_cast<int>(std::round(
                              static_cast<double>(mstDelMs) * 0.001 * sr)));
         masterDelayBufL[static_cast<size_t>(masterDelayWritePos)] = left;
         masterDelayBufR[static_cast<size_t>(masterDelayWritePos)] = right;
-        const int readPos = (masterDelayWritePos - delSamp + kMaxDelaySamples) %
-                            kMaxDelaySamples;
+        const int readPos = (masterDelayWritePos - delSamp + maxDelaySamples) %
+                            maxDelaySamples;
         left = masterDelayBufL[static_cast<size_t>(readPos)];
         right = masterDelayBufR[static_cast<size_t>(readPos)];
-        masterDelayWritePos = (masterDelayWritePos + 1) % kMaxDelaySamples;
+        masterDelayWritePos = (masterDelayWritePos + 1) % maxDelaySamples;
       }
 
       // Phase 88: Matrix Plus & Speaker Delay Alignment Network (MIDAS Chapter

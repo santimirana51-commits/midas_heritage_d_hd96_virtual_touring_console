@@ -21,13 +21,15 @@
 
 #include <juce_core/juce_core.h>
 #include <cmath>
+#include <atomic>
+#include <cstdint>
 #include <vector>
 #include <array>
 #include <complex>
 #include <algorithm>
 #include <deque>
-#include <mutex>
 #include <numeric>
+#include <utility>
 
 namespace nova {
 
@@ -95,15 +97,32 @@ public:
         magnitudeDB_.resize(halfSize_, -120.0f);
         phase_.resize(halfSize_, 0.0f);
         peakHold_.resize(halfSize_, -120.0f);
+        publishedMagnitudeDB_.assign(halfSize_, -120.0f);
+        publishedPhase_.assign(halfSize_, 0.0f);
+        publishedPeakHold_.assign(halfSize_, -120.0f);
+        refBuffer_.assign(fftSize_, 0.0f);
+        for (auto &slot : historyFrames_) {
+            slot.frame.magnitudeDB.assign(halfSize_, -120.0f);
+            slot.frame.phase.assign(halfSize_, 0.0f);
+            slot.sequence.store(0, std::memory_order_relaxed);
+            slot.state.store(0, std::memory_order_relaxed);
+        }
+        historyWriteSequence_ = 0;
+        historyPublishedCount_.store(0, std::memory_order_relaxed);
+        frameCount_.store(0, std::memory_order_relaxed);
         inputPos_ = 0;
+        refPos_ = 0;
         generateWindow();
     }
     
     int getFFTSize() const { return fftSize_; }
     int getNumBins() const { return halfSize_; }
     
-    void setSampleRate(double sr) { sampleRate_ = sr; }
-    double getSampleRate() const { return sampleRate_; }
+    void setSampleRate(double sr) {
+        if (std::isfinite(sr) && sr > 1000.0)
+            sampleRate_.store(sr, std::memory_order_relaxed);
+    }
+    double getSampleRate() const { return sampleRate_.load(std::memory_order_relaxed); }
     
     void setWindowFunction(WindowFunction wf) {
         windowFunc_ = wf;
@@ -112,98 +131,114 @@ public:
     
     void setFreqScale(FreqScale fs) { freqScale_ = fs; }
     void setSmoothing(OctaveSmoothing s) { smoothing_ = s; }
-    void setWeighting(WeightingCurve w) { weighting_ = w; }
+    void setWeighting(WeightingCurve w) { weighting_.store(w, std::memory_order_relaxed); }
     void setMode(SpectrogramMode m) { mode_ = m; }
     void setRangeDB(float minDB, float maxDB) { minDB_ = minDB; maxDB_ = maxDB; }
     
     SpectrogramMode getMode() const { return mode_; }
     FreqScale getFreqScale() const { return freqScale_; }
     OctaveSmoothing getSmoothing() const { return smoothing_; }
-    WeightingCurve getWeighting() const { return weighting_; }
+    WeightingCurve getWeighting() const { return weighting_.load(std::memory_order_relaxed); }
     WindowFunction getWindowFunction() const { return windowFunc_; }
     float getMinDB() const { return minDB_; }
     float getMaxDB() const { return maxDB_; }
     
     // ── Peak Hold ──
-    void setPeakHoldEnabled(bool en) { peakHoldEnabled_ = en; }
-    void setPeakDecayRate(float dbPerSec) { peakDecayRate_ = dbPerSec; }
-    void resetPeakHold() {
-        std::fill(peakHold_.begin(), peakHold_.end(), -120.0f);
-    }
-    bool isPeakHoldEnabled() const { return peakHoldEnabled_; }
+    void setPeakHoldEnabled(bool en) { peakHoldEnabled_.store(en, std::memory_order_relaxed); }
+    void setPeakDecayRate(float dbPerSec) { peakDecayRate_.store(std::max(0.0f, dbPerSec), std::memory_order_relaxed); }
+    void resetPeakHold() { resetPeakHoldRequested_.store(true, std::memory_order_release); }
+    bool isPeakHoldEnabled() const { return peakHoldEnabled_.load(std::memory_order_relaxed); }
     
     // ── Freeze ──
-    void setFreeze(bool f) { frozen_ = f; }
-    bool isFrozen() const { return frozen_; }
+    void setFreeze(bool f) { frozen_.store(f, std::memory_order_relaxed); }
+    bool isFrozen() const { return frozen_.load(std::memory_order_relaxed); }
     
     // ── Push Audio Samples ──
-    void pushSamples(const float* data, int numSamples) {
-        if (frozen_) return;
-        std::lock_guard<std::mutex> lock(mutex_);
+    // Single audio-producer entry point. Configuration changes require the
+    // producer to be stopped. This path performs no locking or allocation.
+    void pushSamples(const float* data, int numSamples) noexcept {
+        if (frozen_.load(std::memory_order_relaxed) || data == nullptr || numSamples <= 0) return;
         for (int i = 0; i < numSamples; ++i) {
-            inputBuffer_[inputPos_] = data[i];
-            inputPos_++;
-            if (inputPos_ >= fftSize_) {
-                processFFT();
-                inputPos_ = 0;
-            }
+            inputBuffer_[static_cast<size_t>(inputPos_)] = data[i];
+            if (++inputPos_ >= fftSize_) { processFFT(); inputPos_ = 0; }
         }
     }
     
     // Push reference channel for transfer function
-    void pushReferenceSamples(const float* data, int numSamples) {
-        if (frozen_) return;
-        std::lock_guard<std::mutex> lock(mutex_);
-        refBuffer_.resize(fftSize_, 0.0f);
+    void pushReferenceSamples(const float* data, int numSamples) noexcept {
+        if (frozen_.load(std::memory_order_relaxed) || data == nullptr || numSamples <= 0) return;
         for (int i = 0; i < numSamples; ++i) {
-            refBuffer_[refPos_] = data[i];
-            refPos_++;
-            if (refPos_ >= fftSize_) refPos_ = 0;
+            refBuffer_[static_cast<size_t>(refPos_)] = data[i];
+            if (++refPos_ >= fftSize_) refPos_ = 0;
         }
     }
     
     // ── Get Current Magnitude (smoothed, weighted) ──
-    const std::vector<float>& getMagnitudeDB() const { return magnitudeDB_; }
-    const std::vector<float>& getPhase() const { return phase_; }
-    const std::vector<float>& getPeakHold() const { return peakHold_; }
-    
+    // UI-facing getters return copies. The producer never waits for a reader.
+    std::vector<float> getMagnitudeDB() const { return copyPublished(publishedMagnitudeDB_); }
+    std::vector<float> getPhase() const { return copyPublished(publishedPhase_); }
+    std::vector<float> getPeakHold() const { return copyPublished(publishedPeakHold_); }
+
     // ── Waterfall History ──
     int getHistoryDepth() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return (int)history_.size();
+        return static_cast<int>(std::min<uint64_t>(
+            historyPublishedCount_.load(std::memory_order_acquire), MAX_HISTORY));
     }
-    
+
     FFTFrame getHistoryFrame(int idx) const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (idx >= 0 && idx < (int)history_.size()) return history_[idx];
-        return {};
+        const uint64_t published = historyPublishedCount_.load(std::memory_order_acquire);
+        const uint64_t depth = std::min<uint64_t>(published, MAX_HISTORY);
+        if (idx < 0 || static_cast<uint64_t>(idx) >= depth)
+            return {};
+        const uint64_t sequence = published - depth + static_cast<uint64_t>(idx) + 1;
+        auto &slot = historyFrames_[static_cast<size_t>((sequence - 1) % MAX_HISTORY)];
+        int expected = 0;
+        if (!slot.state.compare_exchange_strong(expected, 2, std::memory_order_acquire))
+            return {};
+        FFTFrame copy;
+        if (slot.sequence.load(std::memory_order_acquire) == sequence)
+            copy = slot.frame;
+        slot.state.store(0, std::memory_order_release);
+        return copy;
     }
-    
-    const std::deque<FFTFrame>& getHistory() const { return history_; }
+
+    std::deque<FFTFrame> getHistory() const {
+        std::deque<FFTFrame> snapshot;
+        const int depth = getHistoryDepth();
+        for (int i = 0; i < depth; ++i) {
+            auto frame = getHistoryFrame(i);
+            if (!frame.magnitudeDB.empty())
+                snapshot.push_back(std::move(frame));
+        }
+        return snapshot;
+    }
     
     // ── Frequency for bin ──
     float binToFreq(int bin) const {
-        return static_cast<float>(bin) * static_cast<float>(sampleRate_) / static_cast<float>(fftSize_);
+        return static_cast<float>(bin) * static_cast<float>(sampleRate_.load(std::memory_order_relaxed)) / static_cast<float>(fftSize_);
     }
     
     int freqToBin(float freq) const {
-        return static_cast<int>(freq * static_cast<float>(fftSize_) / static_cast<float>(sampleRate_));
+        return static_cast<int>(freq * static_cast<float>(fftSize_) / static_cast<float>(sampleRate_.load(std::memory_order_relaxed)));
     }
     
     // ── Statistics ──
-    float getCurrentPeakFreq() const { return currentPeakFreq_; }
-    float getCurrentPeakDB() const { return currentPeakDB_; }
-    float getCurrentRMSdB() const { return currentRMSdB_; }
-    int getFrameCount() const { return frameCount_; }
+    float getCurrentPeakFreq() const { return currentPeakFreq_.load(std::memory_order_relaxed); }
+    float getCurrentPeakDB() const { return currentPeakDB_.load(std::memory_order_relaxed); }
+    float getCurrentRMSdB() const { return currentRMSdB_.load(std::memory_order_relaxed); }
+    int getFrameCount() const { return frameCount_.load(std::memory_order_relaxed); }
     
     // ── Export ──
     juce::String exportCSV() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        const auto magnitude = getMagnitudeDB();
+        const auto phase = getPhase();
         juce::String csv = "Frequency_Hz,Magnitude_dB,Phase_rad\n";
-        for (int i = 0; i < halfSize_; ++i) {
+        const int bins = std::min(static_cast<int>(magnitude.size()),
+                                  static_cast<int>(phase.size()));
+        for (int i = 0; i < bins; ++i) {
             csv += juce::String(binToFreq(i), 2) + ","
-                 + juce::String(magnitudeDB_[i], 2) + ","
-                 + juce::String(phase_[i], 4) + "\n";
+                 + juce::String(magnitude[static_cast<size_t>(i)], 2) + ","
+                 + juce::String(phase[static_cast<size_t>(i)], 4) + "\n";
         }
         return csv;
     }
@@ -230,17 +265,43 @@ public:
     }
     
     // ── Reset ──
+    // Call only while the audio producer is stopped.
     void reset() {
-        std::lock_guard<std::mutex> lock(mutex_);
         std::fill(inputBuffer_.begin(), inputBuffer_.end(), 0.0f);
         std::fill(magnitudeDB_.begin(), magnitudeDB_.end(), -120.0f);
+        std::fill(phase_.begin(), phase_.end(), 0.0f);
         std::fill(peakHold_.begin(), peakHold_.end(), -120.0f);
-        history_.clear();
-        inputPos_ = 0;
-        frameCount_ = 0;
+        std::fill(publishedMagnitudeDB_.begin(), publishedMagnitudeDB_.end(), -120.0f);
+        std::fill(publishedPhase_.begin(), publishedPhase_.end(), 0.0f);
+        std::fill(publishedPeakHold_.begin(), publishedPeakHold_.end(), -120.0f);
+        for (auto &slot : historyFrames_) {
+            slot.sequence.store(0, std::memory_order_relaxed);
+            slot.state.store(0, std::memory_order_relaxed);
+        }
+        inputPos_ = refPos_ = 0;
+        frameCount_.store(0, std::memory_order_relaxed);
+        historyWriteSequence_ = 0;
+        historyPublishedCount_.store(0, std::memory_order_relaxed);
     }
     
 private:
+    struct HistorySlot {
+        std::atomic<int> state{0}; // 0 free, 1 producer, 2 reader
+        std::atomic<uint64_t> sequence{0};
+        FFTFrame frame;
+    };
+
+    std::vector<float> copyPublished(const std::vector<float>& source) const {
+        std::vector<float> copy;
+        int expected = 0;
+        if (!spectrumState_.compare_exchange_strong(expected, 2,
+                                                   std::memory_order_acquire))
+            return copy;
+        copy = source; // UI/control thread allocation only
+        spectrumState_.store(0, std::memory_order_release);
+        return copy;
+    }
+
     void generateWindow() {
         window_.resize(fftSize_);
         for (int i = 0; i < fftSize_; ++i) {
@@ -310,8 +371,9 @@ private:
             
             // Apply weighting
             float freq = binToFreq(i);
-            if (weighting_ == WeightingCurve::A) db += aWeightDB(freq);
-            else if (weighting_ == WeightingCurve::C) db += cWeightDB(freq);
+            const auto weighting = weighting_.load(std::memory_order_relaxed);
+            if (weighting == WeightingCurve::A) db += aWeightDB(freq);
+            else if (weighting == WeightingCurve::C) db += cWeightDB(freq);
             
             magnitudeDB_[i] = db;
             phase_[i] = std::atan2(im, re);
@@ -323,35 +385,56 @@ private:
             sumSquares += mag * mag;
         }
         
-        currentPeakFreq_ = binToFreq(peakBin);
-        currentPeakDB_ = magnitudeDB_[peakBin];
-        float rms = std::sqrt(sumSquares / static_cast<float>(halfSize_));
-        currentRMSdB_ = (rms > 1e-10f) ? 20.0f * std::log10(rms) : -120.0f;
-        
-        // Update peak hold
-        if (peakHoldEnabled_) {
+        // Peak hold is audio-thread-owned; UI requests are applied here.
+        if (resetPeakHoldRequested_.exchange(false, std::memory_order_acq_rel))
+            std::fill(peakHold_.begin(), peakHold_.end(), -120.0f);
+        if (peakHoldEnabled_.load(std::memory_order_relaxed)) {
+            const float decay = peakDecayRate_.load(std::memory_order_relaxed) / 30.0f;
             for (int i = 0; i < halfSize_; ++i) {
-                if (magnitudeDB_[i] > peakHold_[i])
-                    peakHold_[i] = magnitudeDB_[i];
+                if (magnitudeDB_[static_cast<size_t>(i)] > peakHold_[static_cast<size_t>(i)])
+                    peakHold_[static_cast<size_t>(i)] = magnitudeDB_[static_cast<size_t>(i)];
                 else
-                    peakHold_[i] -= peakDecayRate_ / 30.0f;  // ~30fps
+                    peakHold_[static_cast<size_t>(i)] -= decay;
             }
         }
-        
-        // Add to history (waterfall)
-        FFTFrame frame;
-        frame.magnitudeDB = magnitudeDB_;
-        frame.phase = phase_;
-        frame.timestamp = static_cast<double>(frameCount_) * static_cast<double>(fftSize_) / sampleRate_;
-        frame.peakFreq = currentPeakFreq_;
-        frame.peakDB = currentPeakDB_;
-        frame.rmsDB = currentRMSdB_;
-        
-        history_.push_back(frame);
-        if ((int)history_.size() > MAX_HISTORY)
-            history_.pop_front();
-        
-        frameCount_++;
+
+        const int frameNumber = frameCount_.fetch_add(1, std::memory_order_relaxed);
+        currentPeakFreq_.store(binToFreq(peakBin), std::memory_order_relaxed);
+        currentPeakDB_.store(magnitudeDB_[static_cast<size_t>(peakBin)], std::memory_order_relaxed);
+        const float rms = std::sqrt(sumSquares / static_cast<float>(halfSize_));
+        currentRMSdB_.store((rms > 1e-10f) ? 20.0f * std::log10(rms) : -120.0f,
+                             std::memory_order_relaxed);
+
+        // Publish current spectrum only when the UI is not copying it.
+        int expectedSpectrumState = 0;
+        if (spectrumState_.compare_exchange_strong(expectedSpectrumState, 1,
+                                                   std::memory_order_acquire)) {
+            std::copy(magnitudeDB_.begin(), magnitudeDB_.end(), publishedMagnitudeDB_.begin());
+            std::copy(phase_.begin(), phase_.end(), publishedPhase_.begin());
+            std::copy(peakHold_.begin(), peakHold_.end(), publishedPeakHold_.begin());
+            spectrumState_.store(0, std::memory_order_release);
+        }
+
+        // Fixed-capacity waterfall ring. Every frame's vectors are preallocated
+        // by setFFTSize(); a busy UI reader causes this frame to be dropped.
+        const uint64_t sequence = historyWriteSequence_ + 1;
+        auto &slot = historyFrames_[static_cast<size_t>((sequence - 1) % MAX_HISTORY)];
+        int expectedSlotState = 0;
+        if (slot.state.compare_exchange_strong(expectedSlotState, 1,
+                                               std::memory_order_acquire)) {
+            std::copy(magnitudeDB_.begin(), magnitudeDB_.end(), slot.frame.magnitudeDB.begin());
+            std::copy(phase_.begin(), phase_.end(), slot.frame.phase.begin());
+            slot.frame.timestamp = static_cast<double>(frameNumber) *
+                                   static_cast<double>(fftSize_) /
+                                   sampleRate_.load(std::memory_order_relaxed);
+            slot.frame.peakFreq = currentPeakFreq_.load(std::memory_order_relaxed);
+            slot.frame.peakDB = currentPeakDB_.load(std::memory_order_relaxed);
+            slot.frame.rmsDB = currentRMSdB_.load(std::memory_order_relaxed);
+            slot.sequence.store(sequence, std::memory_order_release);
+            slot.state.store(0, std::memory_order_release);
+            historyWriteSequence_ = sequence;
+            historyPublishedCount_.store(sequence, std::memory_order_release);
+        }
     }
     
     // Simple radix-2 DIT FFT (interleaved real/imag)
@@ -398,44 +481,48 @@ private:
     
     int fftSize_ = 4096;
     int halfSize_ = 2048;
-    double sampleRate_ = 48000.0;
-    
+    std::atomic<double> sampleRate_{48000.0};
+
     std::vector<float> inputBuffer_;
     std::vector<float> fftBuffer_;
     std::vector<float> window_;
-    std::vector<float> magnitudeDB_;
+    std::vector<float> magnitudeDB_; // audio-thread working arrays
     std::vector<float> phase_;
     std::vector<float> peakHold_;
+    std::vector<float> publishedMagnitudeDB_;
+    std::vector<float> publishedPhase_;
+    std::vector<float> publishedPeakHold_;
+    mutable std::atomic<int> spectrumState_{0}; // 0 free, 1 producer, 2 reader
     int inputPos_ = 0;
-    
-    // Reference channel
+
+    // Reference channel is preallocated by setFFTSize().
     std::vector<float> refBuffer_;
     int refPos_ = 0;
-    
-    // History for waterfall
-    std::deque<FFTFrame> history_;
-    int frameCount_ = 0;
-    
+
+    // Preallocated fixed-capacity waterfall ring; no vector/deque growth in FFT.
+    mutable std::array<HistorySlot, MAX_HISTORY> historyFrames_{};
+    uint64_t historyWriteSequence_ = 0; // single producer
+    std::atomic<uint64_t> historyPublishedCount_{0};
+    std::atomic<int> frameCount_{0};
+
     // Settings
     WindowFunction windowFunc_ = WindowFunction::Hann;
     FreqScale freqScale_ = FreqScale::Logarithmic;
     OctaveSmoothing smoothing_ = OctaveSmoothing::None;
-    WeightingCurve weighting_ = WeightingCurve::Z;
+    std::atomic<WeightingCurve> weighting_{WeightingCurve::Z};
     SpectrogramMode mode_ = SpectrogramMode::RTA;
     float minDB_ = -120.0f;
     float maxDB_ = 0.0f;
-    
-    // Peak hold
-    bool peakHoldEnabled_ = true;
-    float peakDecayRate_ = 6.0f;  // dB/sec
-    
-    bool frozen_ = false;
-    
-    float currentPeakFreq_ = 0.0f;
-    float currentPeakDB_ = -120.0f;
-    float currentRMSdB_ = -120.0f;
-    
-    mutable std::mutex mutex_;
+
+    // Peak hold / freeze controls cross threads via atomics.
+    std::atomic<bool> peakHoldEnabled_{true};
+    std::atomic<float> peakDecayRate_{6.0f};
+    std::atomic<bool> resetPeakHoldRequested_{false};
+    std::atomic<bool> frozen_{false};
+
+    std::atomic<float> currentPeakFreq_{0.0f};
+    std::atomic<float> currentPeakDB_{-120.0f};
+    std::atomic<float> currentRMSdB_{-120.0f};
 };
 
 } // namespace nova

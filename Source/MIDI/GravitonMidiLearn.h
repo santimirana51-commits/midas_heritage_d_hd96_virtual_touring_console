@@ -310,8 +310,14 @@ public:
         learnState_.active = false;
     }
     
-    bool isLearning() const { return learnState_.active; }
-    const LearnState& getLearnState() const { return learnState_; }
+    bool isLearning() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return learnState_.active;
+    }
+    LearnState getLearnState() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return learnState_;
+    }
     
     // ── Process Incoming MIDI ──
     struct MidiResult {
@@ -343,8 +349,11 @@ public:
             m.targetBus = learnState_.pendingBus;
             m.label = std::string(paramTargetName(m.target)) + " Ch" + std::to_string(m.targetChannel);
             
-            if (!groups_.empty())
-                groups_[activeGroup_].mappings.push_back(m);
+            if (activeGroup_ >= 0 &&
+                activeGroup_ < static_cast<int>(groups_.size()) &&
+                groups_[static_cast<size_t>(activeGroup_)].mappings.size() <
+                    MAX_MAPPINGS)
+                groups_[static_cast<size_t>(activeGroup_)].mappings.push_back(m);
             
             learnState_.active = false;
             
@@ -437,7 +446,7 @@ public:
     int addMapping(const MidiMapping& m, int groupIdx = -1) {
         std::lock_guard<std::mutex> lock(mutex_);
         int gi = (groupIdx >= 0) ? groupIdx : activeGroup_;
-        if (gi >= (int)groups_.size()) return -1;
+        if (gi < 0 || gi >= static_cast<int>(groups_.size())) return -1;
         auto& g = groups_[gi];
         if ((int)g.mappings.size() >= MAX_MAPPINGS) return -1;
         MidiMapping nm = m;
@@ -481,26 +490,35 @@ public:
     }
     
     void setActiveGroup(int idx) {
-        if (idx >= 0 && idx < (int)groups_.size())
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (idx >= 0 && idx < static_cast<int>(groups_.size()))
             activeGroup_ = idx;
     }
-    
-    int getActiveGroup() const { return activeGroup_; }
-    int getGroupCount() const { return (int)groups_.size(); }
-    
-    const MappingGroup& getGroup(int idx) const {
-        static MappingGroup empty;
-        if (idx >= 0 && idx < (int)groups_.size()) return groups_[idx];
-        return empty;
+
+    int getActiveGroup() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return activeGroup_;
     }
-    
-    MappingGroup& getGroupMut(int idx) {
-        return groups_[idx];
+
+    int getGroupCount() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return static_cast<int>(groups_.size());
     }
-    
+
+    // Return a snapshot: never expose references into the concurrently-mutated
+    // mapping vector.
+    MappingGroup getGroup(int idx) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (idx >= 0 && idx < static_cast<int>(groups_.size()))
+            return groups_[static_cast<size_t>(idx)];
+        return {};
+    }
+
     int getMappingCount() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         int total = 0;
-        for (auto& g : groups_) total += (int)g.mappings.size();
+        for (const auto& g : groups_)
+            total += static_cast<int>(g.mappings.size());
         return total;
     }
     
@@ -512,6 +530,7 @@ public:
     };
     
     std::vector<FeedbackMsg> generateFeedback(ParamTarget target, int ch, float normValue) const {
+        std::lock_guard<std::mutex> lock(mutex_);
         std::vector<FeedbackMsg> msgs;
         for (auto& g : groups_) {
             if (!g.active) continue;
@@ -533,6 +552,7 @@ public:
     
     // ── Serialization ──
     juce::String saveToJSON() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         juce::Array<juce::var> arr;
         for (auto& g : groups_) arr.add(g.toVar());
         auto root = new juce::DynamicObject();
@@ -544,21 +564,34 @@ public:
     
     bool loadFromJSON(const juce::String& json) {
         auto parsed = juce::JSON::parse(json);
-        if (auto* obj = parsed.getDynamicObject()) {
-            groups_.clear();
-            activeGroup_ = obj->getProperty("activeGroup");
-            if (auto* arr = obj->getProperty("groups").getArray()) {
-                for (auto& item : *arr)
-                    groups_.push_back(MappingGroup::fromVar(item));
-            }
-            // Recalculate next ID
-            nextId_ = 1;
-            for (auto& g : groups_)
-                for (auto& m : g.mappings)
-                    if (m.id >= nextId_) nextId_ = m.id + 1;
-            return true;
+        auto* obj = parsed.getDynamicObject();
+        if (obj == nullptr)
+            return false;
+
+        std::vector<MappingGroup> loadedGroups;
+        if (auto* arr = obj->getProperty("groups").getArray()) {
+            loadedGroups.reserve(static_cast<size_t>(arr->size()));
+            for (const auto& item : *arr)
+                loadedGroups.push_back(MappingGroup::fromVar(item));
         }
-        return false;
+        if (loadedGroups.empty())
+            loadedGroups.emplace_back();
+
+        int loadedActiveGroup = static_cast<int>(obj->getProperty("activeGroup"));
+        loadedActiveGroup = std::clamp(
+            loadedActiveGroup, 0, static_cast<int>(loadedGroups.size()) - 1);
+        int loadedNextId = 1;
+        for (const auto& group : loadedGroups)
+            for (const auto& mapping : group.mappings)
+                if (mapping.id >= loadedNextId)
+                    loadedNextId = mapping.id + 1;
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        groups_ = std::move(loadedGroups);
+        activeGroup_ = loadedActiveGroup;
+        nextId_ = loadedNextId;
+        learnState_.active = false;
+        return true;
     }
     
 private:

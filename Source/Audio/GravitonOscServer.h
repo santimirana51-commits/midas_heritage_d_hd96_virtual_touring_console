@@ -54,12 +54,13 @@ public:
         if (addrEnd >= size) return false;
         out.address.assign(reinterpret_cast<const char*>(data + offset), addrEnd - offset);
         offset = padTo4(addrEnd + 1);
+        if (offset > size) return false;
 
-        if (offset >= size) return true; // Message with address only is valid
+        if (offset == size) return true; // Message with address only is valid
 
         // 2. Read Type Tags String
         if (data[offset] != ',')
-            return true; // No type tag string
+            return false; // Payload without a type-tag string is malformed
 
         size_t tagEnd = offset;
         while (tagEnd < size && data[tagEnd] != '\0') {
@@ -68,6 +69,7 @@ public:
         if (tagEnd >= size) return false;
         out.typeTags.assign(reinterpret_cast<const char*>(data + offset + 1), tagEnd - (offset + 1));
         offset = padTo4(tagEnd + 1);
+        if (offset > size) return false;
 
         // 3. Read Arguments according to Type Tags
         for (char tag : out.typeTags) {
@@ -86,10 +88,14 @@ public:
                 }
                 case 'i': {
                     if (offset + 4 > size) return false;
-                    int32_t val = (static_cast<int32_t>(data[offset]) << 24) |
-                                  (static_cast<int32_t>(data[offset + 1]) << 16) |
-                                  (static_cast<int32_t>(data[offset + 2]) << 8) |
-                                  static_cast<int32_t>(data[offset + 3]);
+                    const uint32_t bits =
+                        (static_cast<uint32_t>(data[offset]) << 24) |
+                        (static_cast<uint32_t>(data[offset + 1]) << 16) |
+                        (static_cast<uint32_t>(data[offset + 2]) << 8) |
+                        static_cast<uint32_t>(data[offset + 3]);
+                    int32_t val = 0;
+                    static_assert(sizeof(val) == sizeof(bits));
+                    std::memcpy(&val, &bits, sizeof(val));
                     out.intArgs.push_back(val);
                     offset += 4;
                     break;
@@ -103,11 +109,20 @@ public:
                     std::string str(reinterpret_cast<const char*>(data + offset), sEnd - offset);
                     out.stringArgs.push_back(str);
                     offset = padTo4(sEnd + 1);
+                    if (offset > size) return false;
                     break;
                 }
-                default:
-                    // Unsupported or ignore
+                // OSC type tags without payload (OSC 1.0).
+                case 'T':
+                case 'F':
+                case 'N':
+                case 'I':
                     break;
+                default:
+                    // Unknown tags have unknown payload sizes; reject rather than
+                    // silently desynchronizing the remaining argument stream.
+                    out.clear();
+                    return false;
             }
         }
 
@@ -195,6 +210,30 @@ public:
 
     ~OscServer() override {
         stopServer();
+    }
+
+    // UDP OSC has no built-in authentication. Default-deny remote senders;
+    // explicitly allow only trusted controller IP addresses.
+    void setAllowedAddresses(const std::vector<juce::String>& addresses) {
+        std::vector<juce::String> clean;
+        clean.reserve(addresses.size());
+        for (auto address : addresses) {
+            address = address.trim();
+            if (address.isNotEmpty() && std::find(clean.begin(), clean.end(), address) == clean.end())
+                clean.push_back(address);
+        }
+        const juce::ScopedLock sl(clientLock);
+        allowedAddresses = std::move(clean);
+        // Existing UDP peers must not remain broadcast targets after trust is
+        // revoked or the allowlist is replaced.
+        registeredClients.clear();
+        lastClientIp.clear();
+        lastClientPort = 0;
+    }
+
+    std::vector<juce::String> getAllowedAddresses() const {
+        const juce::ScopedLock sl(clientLock);
+        return allowedAddresses;
     }
 
     bool startServer(int port = 53000) {
@@ -298,6 +337,25 @@ public:
 
             if (bytesRead > 0) {
                 packetsReceived.fetch_add(1, std::memory_order_relaxed);
+
+                bool senderAllowed = false;
+                {
+                    const juce::ScopedLock sl(clientLock);
+                    senderAllowed = std::find(allowedAddresses.begin(), allowedAddresses.end(), senderIp) != allowedAddresses.end();
+                }
+                if (!senderAllowed)
+                    continue;
+
+                // Apply the rate ceiling only after allowlist validation so an
+                // untrusted sender cannot consume the trusted controller budget.
+                const uint32_t nowMs = juce::Time::getMillisecondCounter();
+                if (static_cast<uint32_t>(nowMs - rateWindowStartMs_) >= 1000u) {
+                    rateWindowStartMs_ = nowMs;
+                    rateWindowPackets_ = 0;
+                }
+                if (++rateWindowPackets_ > kMaxPacketsPerSecond)
+                    continue;
+
                 {
                     const juce::ScopedLock sl(clientLock);
                     lastClientIp = senderIp;
@@ -338,6 +396,11 @@ private:
     juce::String lastClientIp;
     int lastClientPort{0};
     std::vector<std::pair<juce::String, int>> registeredClients;
+    // Loopback-only until the host explicitly configures trusted tablet IPs.
+    std::vector<juce::String> allowedAddresses{"127.0.0.1", "::1"};
+    static constexpr uint32_t kMaxPacketsPerSecond = 1000;
+    uint32_t rateWindowStartMs_ = 0;
+    uint32_t rateWindowPackets_ = 0;
 };
 
 } // namespace nova::graviton

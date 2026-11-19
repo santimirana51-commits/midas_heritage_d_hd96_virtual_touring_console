@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <thread>
 
 // ---------------------------------------------------------------------------
 // Phase 89 (MIDAS Chapter 36): helpers for the offline mixdown & multi-track
@@ -6943,6 +6944,16 @@ public:
              "Spectrogram: reasonable peak dB");
       expect(spec.getHistoryDepth() >= 1,
              "Spectrogram: waterfall history captured");
+      const auto spectrum = spec.getMagnitudeDB();
+      const auto phase = spec.getPhase();
+      const auto peakHold = spec.getPeakHold();
+      expect(spectrum.size() == 1024 && phase.size() == 1024 &&
+                 peakHold.size() == 1024,
+             "Spectrogram: published snapshots retain configured bin count");
+      const auto historyFrame = spec.getHistoryFrame(0);
+      expect(historyFrame.magnitudeDB.size() == 1024 &&
+                 historyFrame.phase.size() == 1024,
+             "Spectrogram: preallocated history frame is readable");
 
       // Test 3: Weighting curve helpers
       float aWeight1k = nova::SpectrogramEngine::aWeightDB(1000.0f);
@@ -6952,6 +6963,72 @@ public:
       // Test 4: CSV Export
       juce::String csv = spec.exportCSV();
       expect(csv.contains("Frequency_Hz"), "Spectrogram: CSV header verified");
+    }
+
+    // =========================================================================
+    // Suite 118C: OSC sender allowlist defaults and configuration
+    // =========================================================================
+    beginTest("Suite 118C: OSC sender allowlist");
+    {
+      nova::graviton::OscServer osc;
+      auto defaults = osc.getAllowedAddresses();
+      expect(defaults.size() == 2,
+             "OSC: default policy contains loopback addresses only");
+      osc.setAllowedAddresses({juce::String("192.168.1.25"),
+                               juce::String("192.168.1.26")});
+      const auto configured = osc.getAllowedAddresses();
+      expect(configured.size() == 2 &&
+                 configured[0] == "192.168.1.25" &&
+                 configured[1] == "192.168.1.26",
+             "OSC: explicit trusted sender allowlist is retained");
+      osc.setAllowedAddresses({});
+      expect(osc.getAllowedAddresses().empty(),
+             "OSC: empty allowlist denies all senders");
+    }
+
+    // =========================================================================
+    // Suite 118B: Convolution reverb concurrent parameter publication
+    // =========================================================================
+    beginTest("Suite 118B: Convolution reverb concurrent parameter publication");
+    {
+      nova::ConvolutionReverbEngine conv;
+      std::atomic<bool> writerDone{false};
+      std::thread writer([&] {
+        for (int i = 0; i < 500; ++i) {
+          auto params = conv.getParams();
+          params.dryWet = (i % 100) / 100.0f;
+          params.stereoWidth = 0.5f + (i % 150) / 100.0f;
+          conv.setParams(params);
+        }
+        writerDone.store(true, std::memory_order_release);
+      });
+      bool finiteOutput = true;
+      for (int i = 0; i < 50000; ++i) {
+        float left = 0.25f;
+        float right = -0.25f;
+        conv.processStereo(left, right);
+        finiteOutput = finiteOutput && std::isfinite(left) && std::isfinite(right);
+      }
+      writer.join();
+      expect(writerDone.load(std::memory_order_acquire),
+             "Convolution: parameter writer completed");
+      expect(finiteOutput,
+             "Convolution: concurrent parameter updates keep output finite");
+    }
+
+    // =========================================================================
+    // Suite 118A: Sample-rate-aware delay buffer capacity
+    // =========================================================================
+    beginTest("Suite 118A: Sample-rate-aware delay capacity");
+    {
+      expect(nova::MixerEngine::calculateMaxDelaySamples(96000.0) == 48000,
+             "Delay: 500 ms capacity at 96 kHz");
+      expect(nova::MixerEngine::calculateMaxDelaySamples(192000.0) == 96000,
+             "Delay: 500 ms capacity at 192 kHz");
+      expect(nova::MixerEngine::calculateMaxDelaySamples(384000.0) == 192000,
+             "Delay: 500 ms capacity at 384 kHz");
+      expect(nova::MixerEngine::calculateMaxDelaySamples(0.0) == 1,
+             "Delay: invalid sample rate is safely bounded");
     }
 
     // =========================================================================
