@@ -9,6 +9,9 @@
 
 #include "DSP/GravitonDSP.h"
 #include "Effects/GravitonConvolutionReverb.h"
+#include "DSP/GravitonAtomicParameterSnapshot.h"
+#include <mutex>
+#include <type_traits>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -83,6 +86,7 @@ struct HybridReverbParams {
   float duckAmount = 0.0f;
   float duckThreshold = -20.0f;
   float duckRelease = 200.0f;
+  uint64_t revision = 1;
 };
 
 // ─── All-Pass & Comb Building Blocks ──────────────────────────
@@ -190,20 +194,31 @@ public:
 
     convEngine_.setSampleRate(sampleRate_);
     convEngine_.loadFactoryPreset(params_.irPresetIdx);
-    updateEqAndFilters();
+    publishParamsLocked();
+    audioParams_ = params_;
+    updateEqAndFilters(audioParams_);
+    audioRevision_ = audioParams_.revision;
   }
 
-  HybridReverbParams &getParams() { return params_; }
-  const HybridReverbParams &getParams() const { return params_; }
+  HybridReverbParams getParams() const noexcept {
+    HybridReverbParams snapshot{};
+    publishedParams_.load(snapshot);
+    return snapshot;
+  }
+
   void setParams(const HybridReverbParams &p) {
+    std::lock_guard<std::mutex> lock(controlMutex_);
     const bool irChanged =
         (p.irPresetIdx != params_.irPresetIdx ||
          std::abs(p.irDecaySec - params_.irDecaySec) > 0.02f ||
          std::abs(p.irSizePct - params_.irSizePct) > 0.5f);
     params_ = p;
+    params_.revision = controlRevision_ + 1u;
+    controlRevision_ = params_.revision;
+    publishedParams_.publish(params_);
     if (irChanged) {
-      if (p.irPresetIdx != convEngine_.getCurrentPresetIndex())
-        convEngine_.loadFactoryPreset(p.irPresetIdx);
+      if (params_.irPresetIdx != convEngine_.getCurrentPresetIndex())
+        convEngine_.loadFactoryPreset(params_.irPresetIdx);
       auto cp = convEngine_.getParams();
       cp.decayScale = std::clamp(params_.irDecaySec / 3.5f, 0.2f, 3.0f);
       cp.sizePct = std::clamp(params_.irSizePct * 2.0f, 50.0f, 200.0f);
@@ -211,19 +226,15 @@ public:
       cp.preDelayMs = 0.0f;
       convEngine_.setParams(cp);
     }
-    updateEqAndFilters();
   }
 
   ConvolutionReverbEngine &getConvEngine() { return convEngine_; }
   const ConvolutionReverbEngine &getConvEngine() const { return convEngine_; }
 
   void loadIrPreset(int idx) {
-    params_.irPresetIdx = std::clamp(idx, 0, ConvolutionReverbEngine::kNumFactoryPresets - 1);
-    convEngine_.loadFactoryPreset(params_.irPresetIdx);
-    auto cp = convEngine_.getParams();
-    cp.dryWet = 1.0f;
-    cp.preDelayMs = 0.0f;
-    convEngine_.setParams(cp);
+    auto p = getParams();
+    p.irPresetIdx = std::clamp(idx, 0, ConvolutionReverbEngine::kNumFactoryPresets - 1);
+    setParams(p);
   }
 
   void getIrWaveformPeaks(std::vector<float> &outL, std::vector<float> &outR,
@@ -236,11 +247,12 @@ public:
                      std::clamp(freqHz, 10.0, sampleRate_ * 0.49) / sampleRate_;
     const std::complex<double> z1 = std::polar(1.0, -w);
     const std::complex<double> z2 = std::polar(1.0, -2.0 * w);
+    const auto p = getParams();
     double totalDb = 0.0;
     for (int b = 0; b < 4; ++b) {
-      const int passes = (params_.eqBands[static_cast<size_t>(b)].type == 0 ||
-                          params_.eqBands[static_cast<size_t>(b)].type == 4)
-                             ? std::clamp(params_.eqBands[static_cast<size_t>(b)].slopeDb / 12, 1, 5)
+      const int passes = (p.eqBands[static_cast<size_t>(b)].type == 0 ||
+                          p.eqBands[static_cast<size_t>(b)].type == 4)
+                             ? std::clamp(p.eqBands[static_cast<size_t>(b)].slopeDb / 12, 1, 5)
                              : 1;
       const auto &c = eqCoeffs_[static_cast<size_t>(b)];
       const std::complex<double> num = c.b0 + c.b1 * z1 + c.b2 * z2;
@@ -252,18 +264,25 @@ public:
   }
 
   void processStereo(float &left, float &right) {
+    HybridReverbParams latest{};
+    if (publishedParams_.load(latest) && latest.revision != audioRevision_) {
+      audioParams_ = latest;
+      updateEqAndFilters(audioParams_);
+      audioRevision_ = audioParams_.revision;
+    }
+    const auto &p = audioParams_;
     const float dryL = std::isfinite(left) ? left : 0.0f;
     const float dryR = std::isfinite(right) ? right : 0.0f;
 
-    const float sendGain = std::pow(10.0f, params_.sendDb / 20.0f);
-    float inL = dryL * sendGain + fbStateL_ * (params_.feedbackPct * 0.0085f);
-    float inR = dryR * sendGain + fbStateR_ * (params_.feedbackPct * 0.0085f);
+    const float sendGain = std::pow(10.0f, p.sendDb / 20.0f);
+    float inL = dryL * sendGain + fbStateL_ * (p.feedbackPct * 0.0085f);
+    float inR = dryR * sendGain + fbStateR_ * (p.feedbackPct * 0.0085f);
 
-    if (params_.eqPreAlgo)
+    if (p.eqPreAlgo)
       apply4BandEq(inL, inR);
 
     // Pre-delay
-    int preDelaySamples = static_cast<int>(params_.preDelayMs * sampleRate_ / 1000.0);
+    int preDelaySamples = static_cast<int>(p.preDelayMs * sampleRate_ / 1000.0);
     preDelaySamples = std::clamp(preDelaySamples, 0, MAX_PRE_DELAY - 1);
     float preL = inL, preR = inR;
     if (preDelaySamples > 0 && !preDelayBufL_.empty()) {
@@ -277,13 +296,13 @@ public:
 
     // Convolution IR path
     float convL = preL, convR = preR;
-    if (params_.routing != 2) {
+    if (p.routing != 2) {
       convEngine_.processStereo(convL, convR);
-      if (params_.irLoDampPct > 1.0f) {
+      if (p.irLoDampPct > 1.0f) {
         convL = static_cast<float>(convLoDampL_.process(convL));
         convR = static_cast<float>(convLoDampR_.process(convR));
       }
-      if (params_.irDampingPct > 1.0f) {
+      if (p.irDampingPct > 1.0f) {
         convL = static_cast<float>(convHiDampL_.process(convL));
         convR = static_cast<float>(convHiDampR_.process(convR));
       }
@@ -292,43 +311,43 @@ public:
     }
 
     // Algorithmic Reverb path (Routing 1 Serial feeds Conv into Algo)
-    float algoInL = (params_.routing == 1) ? convL : preL;
-    float algoInR = (params_.routing == 1) ? convR : preR;
+    float algoInL = (p.routing == 1) ? convL : preL;
+    float algoInR = (p.routing == 1) ? convR : preR;
     float algoL = 0.0f, algoR = 0.0f;
-    if (params_.routing != 3) {
+    if (p.routing != 3) {
       runAlgorithmic(algoInL, algoInR, algoL, algoR);
     }
 
     // Combine Routing & Blend
     float wetL = 0.0f, wetR = 0.0f;
-    if (params_.routing == 2) {
+    if (p.routing == 2) {
       wetL = algoL; wetR = algoR;
-    } else if (params_.routing == 3) {
+    } else if (p.routing == 3) {
       wetL = convL; wetR = convR;
-    } else if (params_.routing == 1) {
-      const float b = params_.irBlendPct * 0.01f;
+    } else if (p.routing == 1) {
+      const float b = p.irBlendPct * 0.01f;
       wetL = algoL * (1.0f - b * 0.5f) + convL * (b * 0.5f);
       wetR = algoR * (1.0f - b * 0.5f) + convR * (b * 0.5f);
     } else {
-      const float b = params_.irBlendPct * 0.01f; // 0=Algo, 100=Conv
+      const float b = p.irBlendPct * 0.01f; // 0=Algo, 100=Conv
       wetL = algoL * (1.0f - b) + convL * b;
       wetR = algoR * (1.0f - b) + convR * b;
     }
 
-    if (!params_.eqPreAlgo)
+    if (!p.eqPreAlgo)
       apply4BandEq(wetL, wetR);
 
     // Vintage Character
-    if (params_.vintageMode > 0) {
-      const float drv = 1.0f + params_.vintageMode * 0.35f;
+    if (p.vintageMode > 0) {
+      const float drv = 1.0f + p.vintageMode * 0.35f;
       wetL = std::tanh(wetL * drv) / drv;
       wetR = std::tanh(wetR * drv) / drv;
     }
 
     // Bass Mono (< 120 Hz M/S fold on Side) + Stereo Width
     const float mid = (wetL + wetR) * 0.5f;
-    float side = (wetL - wetR) * 0.5f * params_.stereoSpread;
-    if (params_.bassMono)
+    float side = (wetL - wetR) * 0.5f * p.stereoSpread;
+    if (p.bassMono)
       side = static_cast<float>(bassMonoHpf_.process(side));
     wetL = mid + side;
     wetR = mid - side;
@@ -336,8 +355,8 @@ public:
     fbStateL_ = std::clamp(wetL, -2.0f, 2.0f);
     fbStateR_ = std::clamp(wetR, -2.0f, 2.0f);
 
-    left = std::clamp(dryL * (1.0f - params_.dryWet) + wetL * params_.dryWet, -4.0f, 4.0f);
-    right = std::clamp(dryR * (1.0f - params_.dryWet) + wetR * params_.dryWet, -4.0f, 4.0f);
+    left = std::clamp(dryL * (1.0f - p.dryWet) + wetL * p.dryWet, -4.0f, 4.0f);
+    right = std::clamp(dryR * (1.0f - p.dryWet) + wetR * p.dryWet, -4.0f, 4.0f);
   }
 
   void reset() {
@@ -364,17 +383,18 @@ public:
 
 #if NOVA_HAS_JUCE_CORE
   juce::var toVar() const {
+    const auto p = getParams();
     auto obj = new juce::DynamicObject();
-    obj->setProperty("dryWet", static_cast<double>(params_.dryWet));
-    obj->setProperty("preDelayMs", static_cast<double>(params_.preDelayMs));
-    obj->setProperty("size", static_cast<double>(params_.size));
-    obj->setProperty("decay", static_cast<double>(params_.decay));
-    obj->setProperty("diffusion", static_cast<double>(params_.diffusion));
-    obj->setProperty("routing", params_.routing);
-    obj->setProperty("algorithm", params_.algorithm);
-    obj->setProperty("freeze", params_.freeze);
-    obj->setProperty("irBlendPct", static_cast<double>(params_.irBlendPct));
-    obj->setProperty("stereoSpread", static_cast<double>(params_.stereoSpread));
+    obj->setProperty("dryWet", static_cast<double>(p.dryWet));
+    obj->setProperty("preDelayMs", static_cast<double>(p.preDelayMs));
+    obj->setProperty("size", static_cast<double>(p.size));
+    obj->setProperty("decay", static_cast<double>(p.decay));
+    obj->setProperty("diffusion", static_cast<double>(p.diffusion));
+    obj->setProperty("routing", p.routing);
+    obj->setProperty("algorithm", p.algorithm);
+    obj->setProperty("freeze", p.freeze);
+    obj->setProperty("irBlendPct", static_cast<double>(p.irBlendPct));
+    obj->setProperty("stereoSpread", static_cast<double>(p.stereoSpread));
     return juce::var(obj);
   }
 #endif
@@ -382,7 +402,7 @@ public:
 private:
   void runAlgorithmic(float inL, float inR, float &outL, float &outR) {
     // Algo Delay
-    int aDelay = std::clamp(static_cast<int>(params_.algoDelayMs * sampleRate_ / 1000.0),
+    int aDelay = std::clamp(static_cast<int>(audioParams_.algoDelayMs * sampleRate_ / 1000.0),
                             0, MAX_PRE_DELAY - 1);
     float dL = inL, dR = inR;
     if (aDelay > 0 && !algoDelayBufL_.empty()) {
@@ -395,25 +415,25 @@ private:
     }
 
     // Attack swell
-    if (params_.algoAttackMs > 1.0f) {
+    if (audioParams_.algoAttackMs > 1.0f) {
       const float trig = std::max(std::abs(dL), std::abs(dR));
-      const float coeff = std::exp(-1000.0f / (params_.algoAttackMs * static_cast<float>(sampleRate_)));
+      const float coeff = std::exp(-1000.0f / (audioParams_.algoAttackMs * static_cast<float>(sampleRate_)));
       attackEnv_ = coeff * attackEnv_ + (1.0f - coeff) * std::min(1.0f, trig * 4.0f + 0.15f);
       dL *= attackEnv_;
       dR *= attackEnv_;
     }
 
-    const float roomScale = std::clamp(params_.size, 0.05f, 1.0f) * 0.45f + 0.65f;
-    const float rt60 = params_.freeze ? 120.0f : std::max(0.1f, params_.decay);
+    const float roomScale = std::clamp(audioParams_.size, 0.05f, 1.0f) * 0.45f + 0.65f;
+    const float rt60 = audioParams_.freeze ? 120.0f : std::max(0.1f, audioParams_.decay);
 
-    modPhase_ += params_.modRate / static_cast<float>(sampleRate_);
+    modPhase_ += audioParams_.modRate / static_cast<float>(sampleRate_);
     if (modPhase_ > 1.0f) modPhase_ -= 1.0f;
     const float lfo = std::sin(6.2831853f * modPhase_);
-    const int modOffset = static_cast<int>(lfo * params_.modDepth * 22.0f);
+    const int modOffset = static_cast<int>(lfo * audioParams_.modDepth * 22.0f);
 
-    float damp = params_.highDamping;
-    if (params_.algorithm == 0) damp = std::max(damp, 0.65f);      // Dark Hall
-    else if (params_.algorithm == 1) damp = std::min(damp, 0.25f); // Quartz
+    float damp = audioParams_.highDamping;
+    if (audioParams_.algorithm == 0) damp = std::max(damp, 0.65f);      // Dark Hall
+    else if (audioParams_.algorithm == 1) damp = std::min(damp, 0.25f); // Quartz
 
     float combOutL = 0.0f, combOutR = 0.0f;
     for (int i = 0; i < NUM_COMBS; ++i) {
@@ -424,9 +444,9 @@ private:
                               (i % 2 == 1 ? modOffset : -modOffset),
                           1, 4095);
       float fbL = std::min(std::pow(0.001f, static_cast<float>(dl) / (rt60 * static_cast<float>(sampleRate_))),
-                           params_.freeze ? 1.0f : 0.985f);
+                           audioParams_.freeze ? 1.0f : 0.985f);
       float fbR = std::min(std::pow(0.001f, static_cast<float>(dr) / (rt60 * static_cast<float>(sampleRate_))),
-                           params_.freeze ? 1.0f : 0.985f);
+                           audioParams_.freeze ? 1.0f : 0.985f);
       combOutL += combsL_[static_cast<size_t>(i)].process(dL, dl, fbL, damp);
       combOutR += combsR_[static_cast<size_t>(i)].process(dR, dr, fbR, damp);
     }
@@ -436,26 +456,26 @@ private:
     float apL = combOutL, apR = combOutR;
     for (int i = 0; i < NUM_ALLPASS; ++i) {
       int dl = std::clamp(static_cast<int>(apDelay_[static_cast<size_t>(i)] * roomScale), 1, 2047);
-      apL = allpassL_[static_cast<size_t>(i)].process(apL, dl, params_.diffusion * 0.5f);
-      apR = allpassR_[static_cast<size_t>(i)].process(apR, dl, params_.diffusion * 0.5f);
+      apL = allpassL_[static_cast<size_t>(i)].process(apL, dl, audioParams_.diffusion * 0.5f);
+      apR = allpassR_[static_cast<size_t>(i)].process(apR, dl, audioParams_.diffusion * 0.5f);
     }
 
     // Shimmer / Prism harmonic sheen
-    if (params_.algorithm == 2 || params_.algorithm == 3 || params_.shimmer > 0.01f) {
-      const float shimAmt = (params_.algorithm == 2) ? 0.30f : (params_.algorithm == 3 ? 0.18f : params_.shimmer * 0.3f);
+    if (audioParams_.algorithm == 2 || audioParams_.algorithm == 3 || audioParams_.shimmer > 0.01f) {
+      const float shimAmt = (audioParams_.algorithm == 2) ? 0.30f : (audioParams_.algorithm == 3 ? 0.18f : audioParams_.shimmer * 0.3f);
       apL += std::abs(apL) * shimAmt;
       apR += std::abs(apR) * shimAmt;
     }
 
-    outL = apL * params_.lateLevel;
-    outR = apR * params_.lateLevel;
+    outL = apL * audioParams_.lateLevel;
+    outR = apR * audioParams_.lateLevel;
   }
 
   void apply4BandEq(float &l, float &r) noexcept {
     for (int b = 0; b < 4; ++b) {
-      const int passes = (params_.eqBands[static_cast<size_t>(b)].type == 0 ||
-                          params_.eqBands[static_cast<size_t>(b)].type == 4)
-                             ? std::clamp(params_.eqBands[static_cast<size_t>(b)].slopeDb / 12, 1, 5)
+      const int passes = (audioParams_.eqBands[static_cast<size_t>(b)].type == 0 ||
+                          audioParams_.eqBands[static_cast<size_t>(b)].type == 4)
+                             ? std::clamp(audioParams_.eqBands[static_cast<size_t>(b)].slopeDb / 12, 1, 5)
                              : 1;
       for (int p = 0; p < passes; ++p) {
         l = static_cast<float>(eqFiltersL_[static_cast<size_t>(b)][static_cast<size_t>(p)].process(l));
@@ -464,18 +484,18 @@ private:
     }
   }
 
-  void updateEqAndFilters() noexcept {
+  void updateEqAndFilters(const HybridReverbParams &p) noexcept {
     const double sr = std::max(8000.0, sampleRate_);
     bassMonoHpf_.setCoefficients(graviton::makeButterworthHPF(sr, 120.0));
-    const double loDampHz = 20.0 + params_.irLoDampPct * 3.5;
-    const double hiDampHz = 18000.0 - params_.irDampingPct * 140.0;
+    const double loDampHz = 20.0 + p.irLoDampPct * 3.5;
+    const double hiDampHz = 18000.0 - p.irDampingPct * 140.0;
     convLoDampL_.setCoefficients(graviton::makeButterworthHPF(sr, loDampHz));
     convLoDampR_.setCoefficients(graviton::makeButterworthHPF(sr, loDampHz));
     convHiDampL_.setCoefficients(graviton::makeButterworthLPF(sr, std::clamp(hiDampHz, 1200.0, sr * 0.45)));
     convHiDampR_.setCoefficients(graviton::makeButterworthLPF(sr, std::clamp(hiDampHz, 1200.0, sr * 0.45)));
 
     for (int b = 0; b < 4; ++b) {
-      const auto &eb = params_.eqBands[static_cast<size_t>(b)];
+      const auto &eb = p.eqBands[static_cast<size_t>(b)];
       graviton::BiquadCoefficients c;
       if (eb.type == 0)
         c = graviton::makeButterworthHPF(sr, std::clamp<double>(eb.freqHz, 20.0, sr * 0.45));
@@ -492,7 +512,17 @@ private:
     }
   }
 
-  HybridReverbParams params_;
+  void publishParamsLocked() noexcept {
+    params_.revision = ++controlRevision_;
+    publishedParams_.publish(params_);
+  }
+
+  HybridReverbParams params_; // control-thread-owned
+  mutable std::mutex controlMutex_;
+  AtomicParameterSnapshot<HybridReverbParams> publishedParams_;
+  HybridReverbParams audioParams_{}; // audio-thread-owned
+  uint64_t controlRevision_ = 1;
+  uint64_t audioRevision_ = 0;
   double sampleRate_ = 48000.0;
   ConvolutionReverbEngine convEngine_;
 
