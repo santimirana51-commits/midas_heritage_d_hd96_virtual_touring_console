@@ -2041,7 +2041,8 @@ public:
             masterBusEqHighGainDb.load(std::memory_order_relaxed)));
     masterBusChain.setDitherEnabled(
         masterBusDitherEnabled.load(std::memory_order_relaxed));
-    monitorEq.prepare(sr);
+    // Monitor EQ coefficients are prepared on device start (audioDeviceAboutToStart).
+    // Do not run coefficient preparation in every audio block.
     const bool monEqBypassBlock =
         monitorEqBypass.load(std::memory_order_relaxed);
     const float fxMonGainBlock = nova::graviton::dbToGain(
