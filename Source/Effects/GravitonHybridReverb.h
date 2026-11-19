@@ -154,6 +154,7 @@ public:
   HybridReverbEngine() { init(48000.0); }
 
   void init(double sampleRate) {
+    std::lock_guard<std::mutex> lock(controlMutex_);
     if (sampleRate <= 1000.0)
       return;
     if (std::abs(sampleRate - sampleRate_) < 1.0 && !earlyBufL_.empty())
@@ -243,22 +244,34 @@ public:
   }
 
   double getEqMagnitudeDb(double freqHz) const noexcept {
+    const auto p = getParams();
+    const double sr = std::max(8000.0, convEngine_.getSampleRate());
     const double w = 2.0 * 3.14159265358979323846 *
-                     std::clamp(freqHz, 10.0, sampleRate_ * 0.49) / sampleRate_;
+                     std::clamp(freqHz, 10.0, sr * 0.49) / sr;
     const std::complex<double> z1 = std::polar(1.0, -w);
     const std::complex<double> z2 = std::polar(1.0, -2.0 * w);
-    const auto p = getParams();
     double totalDb = 0.0;
     for (int b = 0; b < 4; ++b) {
-      const int passes = (p.eqBands[static_cast<size_t>(b)].type == 0 ||
-                          p.eqBands[static_cast<size_t>(b)].type == 4)
-                             ? std::clamp(p.eqBands[static_cast<size_t>(b)].slopeDb / 12, 1, 5)
-                             : 1;
-      const auto &c = eqCoeffs_[static_cast<size_t>(b)];
+      const auto &eb = p.eqBands[static_cast<size_t>(b)];
+      const int passes = (eb.type == 0 || eb.type == 4)
+          ? std::clamp(eb.slopeDb / 12, 1, 5) : 1;
+      graviton::BiquadCoefficients c;
+      if (eb.type == 0)
+        c = graviton::makeButterworthHPF(
+            sr, std::clamp<double>(eb.freqHz, 20.0, sr * 0.45));
+      else if (eb.type == 4)
+        c = graviton::makeButterworthLPF(
+            sr, std::clamp<double>(eb.freqHz, 80.0, sr * 0.45));
+      else
+        c = graviton::makePeakingEq(
+            sr, std::clamp<double>(eb.freqHz, 20.0, sr * 0.45),
+            eb.gainDb, std::clamp<double>(eb.q, 0.3, 8.0));
       const std::complex<double> num = c.b0 + c.b1 * z1 + c.b2 * z2;
       const std::complex<double> den = 1.0 + c.a1 * z1 + c.a2 * z2;
-      const double m = std::abs(num) / std::max(1.0e-12, std::abs(den));
-      totalDb += static_cast<double>(passes) * 20.0 * std::log10(std::max(1.0e-9, m));
+      const double magnitude = std::abs(num) /
+                               std::max(1.0e-12, std::abs(den));
+      totalDb += static_cast<double>(passes) *
+                 20.0 * std::log10(std::max(1.0e-9, magnitude));
     }
     return totalDb;
   }
