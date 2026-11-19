@@ -138,9 +138,13 @@ public:
         audioRevision_ = audioParams_.revision;
     }
 
+    // Called during device preparation while the audio callback is stopped.
     void setSampleRate(double sr) noexcept {
-        if (sr > 1000.0 && std::abs(sr - sampleRate) > 1.0) {
-            sampleRate = sr; // coefficients are rebuilt by processStereo on the audio thread
+        if (std::isfinite(sr) && sr > 1000.0 &&
+            std::abs(sr - sampleRate) > 1.0) {
+            sampleRate = sr;
+            updateFilters(audioParams_);
+            audioFilterSampleRate_ = sampleRate;
         }
     }
 
