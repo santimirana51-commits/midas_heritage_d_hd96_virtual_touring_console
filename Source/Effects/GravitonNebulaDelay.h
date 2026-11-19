@@ -147,49 +147,49 @@ public:
         std::lock_guard<std::mutex> lock(controlMutex_); bpm = std::clamp(newBpm, 20.0, 300.0); 
         publishParamsLocked();
     }
-    double getBpm() const noexcept { return bpm; }
+    double getBpm() const noexcept { return getCurrentPreset().bpm; }
 
     void setSyncEnabled(bool sync) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); syncEnabled = sync; 
         publishParamsLocked();
     }
-    bool getSyncEnabled() const noexcept { return syncEnabled; }
+    bool getSyncEnabled() const noexcept { return getCurrentPreset().syncEnabled; }
 
     void setLinked(bool lk) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); linked = lk; 
         publishParamsLocked();
     }
-    bool getLinked() const noexcept { return linked; }
+    bool getLinked() const noexcept { return getCurrentPreset().linked; }
 
     void setAnalogMode(DelayAnalogMode mode) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); analogMode = mode; 
         publishParamsLocked();
     }
-    DelayAnalogMode getAnalogMode() const noexcept { return analogMode; }
+    DelayAnalogMode getAnalogMode() const noexcept { return getCurrentPreset().analogMode; }
 
     void setFxEnabled(bool on) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); fxEnabled = on; 
         publishParamsLocked();
     }
-    bool getFxEnabled() const noexcept { return fxEnabled; }
+    bool getFxEnabled() const noexcept { return getCurrentPreset().fxEnabled; }
 
     void setBypass(bool bp) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); bypassed = bp; 
         publishParamsLocked();
     }
-    bool getBypass() const noexcept { return bypassed; }
+    bool getBypass() const noexcept { return getCurrentPreset().bypassed; }
 
     void setInputGainDb(double db) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); inGainDb = std::clamp(db, -24.0, 24.0); 
         publishParamsLocked();
     }
-    double getInputGainDb() const noexcept { return inGainDb; }
+    double getInputGainDb() const noexcept { return getCurrentPreset().inGainDb; }
 
     void setOutputGainDb(double db) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); outGainDb = std::clamp(db, -24.0, 24.0); 
         publishParamsLocked();
     }
-    double getOutputGainDb() const noexcept { return outGainDb; }
+    double getOutputGainDb() const noexcept { return getCurrentPreset().outGainDb; }
 
     void resetClip() noexcept {
         clipOccurredIn.store(false, std::memory_order_relaxed);
@@ -250,6 +250,7 @@ public:
         double bpm = 120.0;
         bool fxEnabled = true;
         bool bypassed = false;
+        bool linked = false;
         uint64_t revision = 1;
     };
     static_assert(std::is_trivially_copyable<Preset>::value, "Delay preset snapshot must be trivially copyable");
@@ -404,6 +405,7 @@ public:
         bpm = p.bpm;
         fxEnabled = p.fxEnabled;
         bypassed = p.bypassed;
+        linked = p.linked;
         publishParamsLocked();
     }
 
@@ -458,6 +460,7 @@ private:
         p.bpm = bpm;
         p.fxEnabled = fxEnabled;
         p.bypassed = bypassed;
+        p.linked = linked;
         p.revision = controlRevision_;
         return p;
     }
@@ -468,7 +471,7 @@ public:
         std::lock_guard<std::mutex> lock(controlMutex_); inputSourceL = src; 
         publishParamsLocked();
     }
-    DelayInputSource getInputSourceL() const noexcept { return inputSourceL; }
+    DelayInputSource getInputSourceL() const noexcept { return getCurrentPreset().inputSourceL; }
 
     void setDelayTimeMsL(double ms) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -477,7 +480,7 @@ public:
     
         publishParamsLocked();
     }
-    double getDelayTimeMsL() const noexcept { return delayTimeMsL; }
+    double getDelayTimeMsL() const noexcept { return getCurrentPreset().delayTimeMsL; }
 
     void setNoteDivisionL(NoteDivision div) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -486,7 +489,7 @@ public:
     
         publishParamsLocked();
     }
-    NoteDivision getNoteDivisionL() const noexcept { return noteDivL; }
+    NoteDivision getNoteDivisionL() const noexcept { return getCurrentPreset().noteDivL; }
 
     void setDeviationCentsL(double cents) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -495,7 +498,7 @@ public:
     
         publishParamsLocked();
     }
-    double getDeviationCentsL() const noexcept { return deviationCentsL; }
+    double getDeviationCentsL() const noexcept { return getCurrentPreset().deviationCentsL; }
 
     void divideTimeL() noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -519,7 +522,7 @@ public:
 
         publishParamsLocked();
     }
-    double getHpfHzL() const noexcept { return hpfHzL; }
+    double getHpfHzL() const noexcept { return getCurrentPreset().hpfHzL; }
 
     void setHpfsDbL(double slope) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -528,7 +531,7 @@ public:
 
         publishParamsLocked();
     }
-    double getHpfsDbL() const noexcept { return hpfsDbL; }
+    double getHpfsDbL() const noexcept { return getCurrentPreset().hpfsDbL; }
 
     void setLpfHzL(double hz) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -537,7 +540,7 @@ public:
 
         publishParamsLocked();
     }
-    double getLpfHzL() const noexcept { return lpfHzL; }
+    double getLpfHzL() const noexcept { return getCurrentPreset().lpfHzL; }
 
     void setLpfsDbL(double slope) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -546,7 +549,7 @@ public:
 
         publishParamsLocked();
     }
-    double getLpfsDbL() const noexcept { return lpfsDbL; }
+    double getLpfsDbL() const noexcept { return getCurrentPreset().lpfsDbL; }
 
     void setFeedbackL(double pct) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -555,7 +558,7 @@ public:
     
         publishParamsLocked();
     }
-    double getFeedbackL() const noexcept { return feedbackPctL; }
+    double getFeedbackL() const noexcept { return getCurrentPreset().feedbackPctL; }
 
     void setCrossfeedLR(double pct) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -564,26 +567,26 @@ public:
     
         publishParamsLocked();
     }
-    double getCrossfeedLR() const noexcept { return crossfeedPctLR; }
+    double getCrossfeedLR() const noexcept { return getCurrentPreset().crossfeedPctLR; }
 
     void setPhaseInvertFeedbackL(bool inv) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); phaseInvFbL = inv; 
         publishParamsLocked();
     }
-    bool getPhaseInvertFeedbackL() const noexcept { return phaseInvFbL; }
+    bool getPhaseInvertFeedbackL() const noexcept { return getCurrentPreset().phaseInvFbL; }
 
     void setPhaseInvertCrossfeedLR(bool inv) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); phaseInvCrossLR = inv; 
         publishParamsLocked();
     }
-    bool getPhaseInvertCrossfeedLR() const noexcept { return phaseInvCrossLR; }
+    bool getPhaseInvertCrossfeedLR() const noexcept { return getCurrentPreset().phaseInvCrossLR; }
 
     // ── Right Channel Parameters ───────────────────────────────────────────
     void setInputSourceR(DelayInputSource src) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); inputSourceR = src; 
         publishParamsLocked();
     }
-    DelayInputSource getInputSourceR() const noexcept { return inputSourceR; }
+    DelayInputSource getInputSourceR() const noexcept { return getCurrentPreset().inputSourceR; }
 
     void setDelayTimeMsR(double ms) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -592,7 +595,7 @@ public:
     
         publishParamsLocked();
     }
-    double getDelayTimeMsR() const noexcept { return delayTimeMsR; }
+    double getDelayTimeMsR() const noexcept { return getCurrentPreset().delayTimeMsR; }
 
     void setNoteDivisionR(NoteDivision div) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -601,7 +604,7 @@ public:
     
         publishParamsLocked();
     }
-    NoteDivision getNoteDivisionR() const noexcept { return noteDivR; }
+    NoteDivision getNoteDivisionR() const noexcept { return getCurrentPreset().noteDivR; }
 
     void setDeviationCentsR(double cents) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -610,7 +613,7 @@ public:
     
         publishParamsLocked();
     }
-    double getDeviationCentsR() const noexcept { return deviationCentsR; }
+    double getDeviationCentsR() const noexcept { return getCurrentPreset().deviationCentsR; }
 
     void divideTimeR() noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -634,7 +637,7 @@ public:
 
         publishParamsLocked();
     }
-    double getHpfHzR() const noexcept { return hpfHzR; }
+    double getHpfHzR() const noexcept { return getCurrentPreset().hpfHzR; }
 
     void setHpfsDbR(double slope) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -643,7 +646,7 @@ public:
 
         publishParamsLocked();
     }
-    double getHpfsDbR() const noexcept { return hpfsDbR; }
+    double getHpfsDbR() const noexcept { return getCurrentPreset().hpfsDbR; }
 
     void setLpfHzR(double hz) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -652,7 +655,7 @@ public:
 
         publishParamsLocked();
     }
-    double getLpfHzR() const noexcept { return lpfHzR; }
+    double getLpfHzR() const noexcept { return getCurrentPreset().lpfHzR; }
 
     void setLpfsDbR(double slope) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -661,7 +664,7 @@ public:
 
         publishParamsLocked();
     }
-    double getLpfsDbR() const noexcept { return lpfsDbR; }
+    double getLpfsDbR() const noexcept { return getCurrentPreset().lpfsDbR; }
 
     void setFeedbackR(double pct) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -670,7 +673,7 @@ public:
     
         publishParamsLocked();
     }
-    double getFeedbackR() const noexcept { return feedbackPctR; }
+    double getFeedbackR() const noexcept { return getCurrentPreset().feedbackPctR; }
 
     void setCrossfeedRL(double pct) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_);
@@ -679,68 +682,68 @@ public:
     
         publishParamsLocked();
     }
-    double getCrossfeedRL() const noexcept { return crossfeedPctRL; }
+    double getCrossfeedRL() const noexcept { return getCurrentPreset().crossfeedPctRL; }
 
     void setPhaseInvertFeedbackR(bool inv) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); phaseInvFbR = inv; 
         publishParamsLocked();
     }
-    bool getPhaseInvertFeedbackR() const noexcept { return phaseInvFbR; }
+    bool getPhaseInvertFeedbackR() const noexcept { return getCurrentPreset().phaseInvFbR; }
 
     void setPhaseInvertCrossfeedRL(bool inv) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); phaseInvCrossRL = inv; 
         publishParamsLocked();
     }
-    bool getPhaseInvertCrossfeedRL() const noexcept { return phaseInvCrossRL; }
+    bool getPhaseInvertCrossfeedRL() const noexcept { return getCurrentPreset().phaseInvCrossRL; }
 
     // ── Output Mixer Controls ──────────────────────────────────────────────
     void setWetLevelL(double pct) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); wetLevelPctL = std::clamp(pct, 0.0, 100.0); 
         publishParamsLocked();
     }
-    double getWetLevelL() const noexcept { return wetLevelPctL; }
+    double getWetLevelL() const noexcept { return getCurrentPreset().wetLevelPctL; }
 
     void setDryLevelL(double pct) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); dryLevelPctL = std::clamp(pct, 0.0, 100.0); 
         publishParamsLocked();
     }
-    double getDryLevelL() const noexcept { return dryLevelPctL; }
+    double getDryLevelL() const noexcept { return getCurrentPreset().dryLevelPctL; }
 
     void setWetPanL(double pan) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); wetPanL = std::clamp(pan, -100.0, 100.0); 
         publishParamsLocked();
     }
-    double getWetPanL() const noexcept { return wetPanL; }
+    double getWetPanL() const noexcept { return getCurrentPreset().wetPanL; }
 
     void setDryPanL(double pan) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); dryPanL = std::clamp(pan, -100.0, 100.0); 
         publishParamsLocked();
     }
-    double getDryPanL() const noexcept { return dryPanL; }
+    double getDryPanL() const noexcept { return getCurrentPreset().dryPanL; }
 
     void setWetLevelR(double pct) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); wetLevelPctR = std::clamp(pct, 0.0, 100.0); 
         publishParamsLocked();
     }
-    double getWetLevelR() const noexcept { return wetLevelPctR; }
+    double getWetLevelR() const noexcept { return getCurrentPreset().wetLevelPctR; }
 
     void setDryLevelR(double pct) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); dryLevelPctR = std::clamp(pct, 0.0, 100.0); 
         publishParamsLocked();
     }
-    double getDryLevelR() const noexcept { return dryLevelPctR; }
+    double getDryLevelR() const noexcept { return getCurrentPreset().dryLevelPctR; }
 
     void setWetPanR(double pan) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); wetPanR = std::clamp(pan, -100.0, 100.0); 
         publishParamsLocked();
     }
-    double getWetPanR() const noexcept { return wetPanR; }
+    double getWetPanR() const noexcept { return getCurrentPreset().wetPanR; }
 
     void setDryPanR(double pan) noexcept {
         std::lock_guard<std::mutex> lock(controlMutex_); dryPanR = std::clamp(pan, -100.0, 100.0); 
         publishParamsLocked();
     }
-    double getDryPanR() const noexcept { return dryPanR; }
+    double getDryPanR() const noexcept { return getCurrentPreset().dryPanR; }
 
     // ── Real-Time Meter Readouts ───────────────────────────────────────────
     float getMeterInL() const noexcept { return meterInL.load(std::memory_order_relaxed); }
