@@ -206,6 +206,7 @@ public:
 
     // ── Preset Definition & Factory Presets ────────────────────────────────
     struct Preset {
+        static_assert(std::is_trivially_copyable<Preset>::value, "Delay preset snapshot must be trivially copyable");
         const char* name = "Default";
         const char* description = "Default Clean Delay";
         bool syncEnabled = true;
@@ -987,10 +988,7 @@ private:
         }
 
         void setCoeffs(double b0_, double b1_, double b2_, double a1_, double a2_) noexcept {
-            std::lock_guard<std::mutex> lock(controlMutex_);
             b0 = b0_; b1 = b1_; b2 = b2_; a1 = a1_; a2 = a2_;
-        
-            publishParamsLocked();
         }
     };
 
